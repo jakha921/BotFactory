@@ -1,0 +1,910 @@
+# Bot Factory - Cursor Rules
+
+## 📋 Обзор Проекта
+
+Bot Factory — SaaS-платформа для создания и управления AI-ботами с интеграцией Telegram и Google Gemini. 
+Монорепозиторий: frontend (React/TypeScript) + backend (Django - в разработке).
+
+---
+
+## 🛠️ Технологический Стек
+
+### Frontend
+- **Framework:** React 19.2.0
+- **Language:** TypeScript 5.8.2 (strict mode, ES2022)
+- **Build Tool:** Vite 6.2.0
+- **State Management:** Zustand 5.0.8 с persist middleware
+- **Styling:** Tailwind CSS (утилитарный подход, Apple HIG inspired)
+- **Animations:** Framer Motion 11.0.0
+- **Icons:** Lucide React 0.554.0
+- **Charts:** Recharts 3.4.1
+- **AI SDK:** @google/genai 1.30.0
+- **Utils:** clsx 2.1.1, tailwind-merge 3.0.0
+
+### Backend (Planned)
+- **Framework:** Django (folder exists but empty)
+- **Expected:** Django REST Framework, PostgreSQL
+
+---
+
+## 📁 Архитектура Проекта
+
+```
+frontend/
+├── components/          # Переиспользуемые компоненты
+│   ├── ui/             # UI primitives (Button, Card, Input, etc.)
+│   ├── Layout.tsx      # Главный layout с sidebar + header
+│   ├── BotSelector.tsx # Dropdown для выбора бота
+│   └── Onboarding.tsx  # Онбординг модал
+├── pages/              # Страницы приложения (Dashboard, Bots, Settings, etc.)
+├── store/              # Zustand stores
+│   ├── useAppStore.ts      # Глобальное состояние приложения (боты, API keys)
+│   ├── useAuthStore.ts     # Аутентификация
+│   ├── useChatStore.ts     # Чат-сообщения
+│   └── useThemeStore.ts    # Тема и UI состояние (sidebar, theme)
+├── services/           # Внешние сервисы
+│   ├── api.ts              # API клиент (mock/real toggle)
+│   ├── geminiService.ts    # Google Gemini AI integration
+│   └── mockData.ts         # Моковые данные для разработки
+├── types.ts            # Глобальные TypeScript типы
+├── utils.ts            # Утилиты (cn, formatNumber, formatDate)
+├── App.tsx             # Root component с роутингом
+└── index.tsx           # Entry point
+```
+
+---
+
+## 🎨 Design System & Styling
+
+### Принципы Дизайна
+**Вдохновение:** Apple Human Interface Guidelines (HIG)
+- **Glassmorphism:** `backdrop-blur-xl`, полупрозрачные фоны (`bg-white/80`, `bg-gray-900/40`)
+- **Subtle Borders:** Alpha-based borders вместо solid colors (`border-black/5`, `border-white/5`)
+- **Elevation:** Минимальные тени (`shadow-sm`, `shadow-xl` только для модалов)
+- **Transitions:** Плавные анимации `duration-200`, `ease-out`
+- **Dark Mode:** Полная поддержка через Tailwind (`dark:` prefix)
+
+### Цветовая Палитра
+```css
+/* Primary Color (Indigo) */
+--primary: #6366f1
+--primary-dark: #4f46e5
+--primary-light: #818cf8
+
+/* Neutral */
+Light Mode: Gray 50-900 (bg-gray-50/50, text-gray-900)
+Dark Mode: Gray 900-50 + White alpha (bg-gray-950, bg-white/5)
+
+/* Semantic Colors */
+Success: Emerald (emerald-500, emerald-50/50)
+Warning: Amber (amber-500, amber-50/50)
+Error/Danger: Red (red-500, red-50/50)
+Info: Blue (blue-500, blue-50/50)
+```
+
+### Компоненты UI
+
+#### Button Variants
+- `primary`: Solid background, primary color
+- `secondary`: Light background, subtle border (`border-black/10`)
+- `ghost`: Transparent, hover effect
+- `danger`: Red background
+- `icon`: Circular, padding-less (for icons only)
+
+#### Card Pattern
+Compound components: `Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter`
+```tsx
+<Card>
+  <CardHeader>
+    <CardTitle>Title</CardTitle>
+    <CardDescription>Description</CardDescription>
+  </CardHeader>
+  <CardContent>Content</CardContent>
+  <CardFooter>Footer</CardFooter>
+</Card>
+```
+
+#### Spacing & Sizing
+- **Padding:** `p-4` (1rem), `p-6` (1.5rem), `px-8` для больших секций
+- **Gaps:** `gap-2` (0.5rem), `gap-4` (1rem), `gap-6` (1.5rem)
+- **Button Heights:** sm: 7 (h-7), md: 9 (h-9), lg: 11 (h-11)
+- **Rounded:** `rounded-lg` (8px), `rounded-xl` (12px), `rounded-full` для аватаров
+
+---
+
+## 🧩 Паттерны Кода
+
+### TypeScript Conventions
+
+#### 1. Все компоненты типизированы с React.FC
+```tsx
+interface MyComponentProps {
+  title: string;
+  onAction?: () => void;
+  isActive?: boolean;
+}
+
+export const MyComponent: React.FC<MyComponentProps> = ({ title, onAction, isActive = false }) => {
+  // ...
+};
+```
+
+#### 2. Используй интерфейсы для объектов, enum для статусов
+```tsx
+// Enum для фиксированных значений
+export enum BotStatus {
+  ACTIVE = 'active',
+  PAUSED = 'paused',
+  ERROR = 'error',
+  DRAFT = 'draft'
+}
+
+// Interface для объектов
+export interface Bot {
+  id: string;
+  name: string;
+  status: BotStatus;
+  // ...
+}
+```
+
+#### 3. Type для union types
+```tsx
+export type View = 'login' | 'dashboard' | 'bots' | 'bot-chat' | 'settings';
+```
+
+### React Patterns
+
+#### 1. Props Spreading
+Всегда деструктурируй и spread остальные props:
+```tsx
+export const Button: React.FC<ButtonProps> = ({ 
+  children, 
+  className, 
+  variant = 'primary',
+  ...props 
+}) => {
+  return <button className={cn(baseStyles, className)} {...props}>{children}</button>;
+};
+```
+
+#### 2. Conditional Rendering
+Используй условные операторы для читаемости:
+```tsx
+{isLoading && <Loader />}
+{error ? <ErrorMessage /> : <Content />}
+{items.length === 0 ? <EmptyState /> : <List items={items} />}
+```
+
+#### 3. Event Handlers
+Именуй с префиксом `handle`:
+```tsx
+const handleSubmit = (e: React.FormEvent) => {
+  e.preventDefault();
+  // logic
+};
+
+const handleBotSelect = (botId: string) => {
+  setSelectedBotId(botId);
+};
+```
+
+### State Management (Zustand)
+
+#### Store Pattern
+```tsx
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+
+interface MyState {
+  // State
+  items: Item[];
+  selectedId: string | null;
+  
+  // Actions
+  setItems: (items: Item[]) => void;
+  setSelectedId: (id: string | null) => void;
+  getSelected: () => Item | undefined;
+}
+
+export const useMyStore = create<MyState>()(
+  persist(
+    (set, get) => ({
+      items: [],
+      selectedId: null,
+      
+      setItems: (items) => set({ items }),
+      setSelectedId: (id) => set({ selectedId: id }),
+      getSelected: () => {
+        const { items, selectedId } = get();
+        return items.find(i => i.id === selectedId);
+      }
+    }),
+    {
+      name: 'my-storage',
+      partialize: (state) => ({ 
+        // Только то, что нужно персистить
+        selectedId: state.selectedId 
+      })
+    }
+  )
+);
+```
+
+**Правила Zustand:**
+- Один store на домен (auth, app, chat, theme)
+- Actions всегда в store, не в компонентах
+- Используй `persist` для данных, которые нужно сохранять
+- `partialize` для контроля, что сохраняется в localStorage
+
+### API & Services
+
+#### API Pattern
+Сервисный слой с toggle mock/real:
+```tsx
+// services/api.ts
+const USE_MOCK = true;
+
+export const api = {
+  bots: {
+    list: () => USE_MOCK ? mockData.getBots() : client.get('/api/bots'),
+    get: (id: string) => USE_MOCK ? mockData.getBotById(id) : client.get(`/api/bots/${id}`),
+  },
+  // ...
+};
+```
+
+#### Data Fetching Pattern
+```tsx
+const [loading, setLoading] = useState(true);
+const [data, setData] = useState<DataType[]>([]);
+
+useEffect(() => {
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const result = await api.getData();
+      setData(result);
+    } catch (error) {
+      console.error("Load Error", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+  loadData();
+}, [dependency]);
+```
+
+**Best Practices:**
+- Всегда используй try-catch-finally
+- `Promise.all` для параллельных запросов
+- Loading states для UX
+
+### Утилиты
+
+#### cn() для классов
+```tsx
+import { cn } from '../utils';
+
+<div className={cn(
+  "base-classes",
+  isActive && "active-classes",
+  variant === 'primary' && "primary-classes",
+  className
+)} />
+```
+
+#### Форматирование
+```tsx
+// utils.ts
+export const formatNumber = (num: number): string => {
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
+  return num.toString();
+};
+
+export const formatDate = (dateString: string): string => {
+  return new Date(dateString).toLocaleDateString('ru-RU', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+};
+```
+
+---
+
+## 🎬 Animations (Framer Motion)
+
+### Паттерны Анимаций
+
+#### 1. Page Transitions
+```tsx
+<AnimatePresence mode="wait">
+  <motion.div
+    key={currentView}
+    initial={{ opacity: 0, y: 10 }}
+    animate={{ opacity: 1, y: 0 }}
+    exit={{ opacity: 0, y: -10 }}
+    transition={{ duration: 0.2, ease: "easeOut" }}
+  >
+    {children}
+  </motion.div>
+</AnimatePresence>
+```
+
+#### 2. Button Press Effect
+```tsx
+<motion.button
+  whileTap={{ scale: disabled ? 1 : 0.97 }}
+  {...props}
+/>
+```
+
+#### 3. Modal/Popover Entry
+```tsx
+<motion.div
+  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+  animate={{ opacity: 1, y: 0, scale: 1 }}
+  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+/>
+```
+
+#### 4. Layout Animations
+```tsx
+<motion.div layoutId="unique-id" />
+```
+
+**Правила:**
+- Всегда wrap с `<AnimatePresence>` для exit анимаций
+- `duration: 0.2` для быстрых UI анимаций
+- `ease: "easeOut"` для естественности
+- `whileTap={{ scale: 0.97 }}` для buttons (если не disabled)
+
+---
+
+## 🔒 Безопасность и Производительность
+
+### Безопасность
+
+#### 1. Environment Variables
+```tsx
+// Переменные окружения через Vite
+const apiKey = process.env.API_KEY || '';
+
+// НИКОГДА не коммить ключи в код
+// Используй .env файлы (добавь в .gitignore)
+```
+
+#### 2. Input Sanitization
+```tsx
+// Санитизация пользовательского ввода перед отправкой
+const sanitizeInput = (input: string): string => {
+  return input.trim().replace(/[<>]/g, '');
+};
+```
+
+#### 3. XSS Protection
+React автоматически экранирует, но:
+```tsx
+// НИКОГДА не используй dangerouslySetInnerHTML без санитизации
+// Если нужно, используй библиотеку типа DOMPurify
+```
+
+### Производительность
+
+#### 1. Избегай N+1 Запросов
+```tsx
+// BAD
+bots.forEach(async (bot) => {
+  const details = await api.bots.get(bot.id); // N запросов
+});
+
+// GOOD
+const botIds = bots.map(b => b.id);
+const details = await api.bots.getBatch(botIds); // 1 запрос
+```
+
+#### 2. Параллельные Запросы
+```tsx
+// GOOD
+const [stats, chart, activity] = await Promise.all([
+  api.stats.dashboard(period),
+  api.stats.chart(period),
+  api.stats.activity()
+]);
+```
+
+#### 3. Мемоизация (когда нужна)
+```tsx
+const expensiveCalculation = useMemo(() => {
+  return items.reduce((acc, item) => acc + item.value, 0);
+}, [items]);
+```
+
+#### 4. Lazy Loading
+```tsx
+// Для больших компонентов
+const HeavyComponent = React.lazy(() => import('./HeavyComponent'));
+
+<Suspense fallback={<Loader />}>
+  <HeavyComponent />
+</Suspense>
+```
+
+---
+
+## 🧪 Разработка и Тестирование
+
+### Development Workflow
+
+#### 1. Vite Dev Server
+```bash
+cd frontend
+npm run dev
+# Server: http://localhost:3000
+```
+
+#### 2. Mock Data Toggle
+```tsx
+// services/api.ts
+const USE_MOCK = true; // false для реального API
+```
+
+#### 3. Hot Module Replacement
+Vite поддерживает HMR по умолчанию — изменения применяются без перезагрузки.
+
+### Code Quality
+
+#### 1. TypeScript Strict Mode
+```json
+// tsconfig.json
+{
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true
+  }
+}
+```
+
+#### 2. Импорты
+```tsx
+// Используй алиас @/ для импортов
+import { Button } from '@/components/ui/Button';
+import { useAppStore } from '@/store/useAppStore';
+
+// Не используй относительные пути для глубоко вложенных файлов
+// BAD: import { Button } from '../../../components/ui/Button';
+```
+
+#### 3. Naming Conventions
+- **Компоненты:** PascalCase (`Button`, `BotSelector`)
+- **Files:** Совпадают с компонентом (`Button.tsx`, `useAppStore.ts`)
+- **Hooks:** camelCase с префиксом `use` (`useAppStore`, `useThemeStore`)
+- **Constants:** UPPER_SNAKE_CASE (`USE_MOCK`, `API_BASE_URL`)
+- **Functions:** camelCase (`formatNumber`, `handleSubmit`)
+
+---
+
+## 🚀 Специфичные Фичи Проекта
+
+### 1. Custom Routing (No React Router)
+```tsx
+// App.tsx
+const [currentView, setCurrentView] = useState<View>('dashboard');
+
+const renderView = () => {
+  switch (currentView) {
+    case 'dashboard': return <Dashboard />;
+    case 'bots': return <Bots />;
+    // ...
+  }
+};
+
+// Navigation
+<Layout currentView={currentView} onNavigate={setCurrentView}>
+  {renderView()}
+</Layout>
+```
+
+**Причина:** Простота для SPA с ограниченным количеством views.
+
+### 2. Bot Context System
+```tsx
+// selectedBotId используется для фильтрации данных
+const { selectedBotId, setSelectedBotId } = useAppStore();
+
+// Страницы, которые требуют выбранного бота
+const documents = await api.knowledge.documents(selectedBotId!);
+
+// ВАЖНО: Сбрасывай selectedBotId при навигации на страницы без контекста
+if (['dashboard', 'bots', 'settings'].includes(view)) {
+  setSelectedBotId(null);
+}
+```
+
+### 3. Google Gemini Integration
+```tsx
+// services/geminiService.ts
+export const generateBotResponse = async (
+  modelName: string,
+  prompt: string,
+  systemInstruction: string,
+  history: { role: 'user' | 'model'; content: string }[],
+  thinkingBudget?: number // Для Gemini 2.5/3.0 thinking models
+) => {
+  const ai = createGeminiClient();
+  const config: any = { 
+    systemInstruction,
+    tools: [{ googleSearch: {} }] // Grounding с Google Search
+  };
+
+  // КРИТИЧНО: maxOutputTokens НЕ должен быть установлен при использовании thinkingConfig
+  if (thinkingBudget) {
+    config.thinkingConfig = { thinkingBudget };
+    config.maxOutputTokens = undefined;
+  }
+  
+  const chat = ai.chats.create({ model: modelName, config, history });
+  const result = await chat.sendMessage({ message: prompt });
+  
+  return {
+    text: result.text,
+    groundingChunks: result.candidates?.[0]?.groundingMetadata?.groundingChunks
+  };
+};
+```
+
+### 4. Theme System
+```tsx
+// store/useThemeStore.ts
+const { theme, toggleTheme, setTheme, initializeTheme } = useThemeStore();
+
+// Инициализируй тему в Layout
+useEffect(() => {
+  initializeTheme(); // Загружает из localStorage или системных настроек
+}, []);
+
+// Toggle
+<button onClick={toggleTheme}>
+  {theme === 'dark' ? <Sun /> : <Moon />}
+</button>
+```
+
+**Dark Mode:** Tailwind class-based (`dark:` prefix), управляется через `<html class="dark">`
+
+### 5. Onboarding Flow
+```tsx
+// App.tsx
+const [showOnboarding, setShowOnboarding] = useState(false);
+
+useEffect(() => {
+  if (isAuthenticated) {
+    setShowOnboarding(true); // Показываем при первом логине
+  }
+}, [isAuthenticated]);
+
+<Onboarding onComplete={() => setShowOnboarding(false)} />
+```
+
+---
+
+## 📝 Правила Генерации Кода
+
+### При создании нового компонента:
+
+1. **Структура файла:**
+```tsx
+import React from 'react';
+import { Icon1, Icon2 } from 'lucide-react'; // Если нужны иконки
+import { cn } from '@/utils'; // Если нужны условные классы
+import { ComponentName } from '@/components/...'; // Импорты компонентов
+
+interface MyComponentProps {
+  // Props
+}
+
+export const MyComponent: React.FC<MyComponentProps> = ({ prop1, prop2, ...props }) => {
+  // State
+  const [state, setState] = useState<Type>(initialValue);
+  
+  // Store
+  const { storeValue } = useMyStore();
+  
+  // Effects
+  useEffect(() => {
+    // ...
+  }, [dependency]);
+  
+  // Handlers
+  const handleAction = () => {
+    // ...
+  };
+  
+  return (
+    <div className={cn("base-styles", props.className)}>
+      {/* JSX */}
+    </div>
+  );
+};
+```
+
+2. **UI Компонент (в ui/):**
+- Максимально переиспользуемый
+- Поддержка variants через props
+- Props spreading
+- Используй `cn()` для классов
+- Экспортируй типы props
+
+3. **Page Компонент (в pages/):**
+- Может использовать stores
+- Может делать API запросы
+- Loading states обязательны
+- Error handling через try-catch
+
+### При рефакторинге:
+
+1. **Улучшай читаемость:**
+- Разбивай длинные компоненты на подкомпоненты
+- Выноси constants наверх файла
+- Группируй похожие операции
+
+2. **Оптимизируй производительность:**
+- Используй `useMemo` для тяжелых вычислений
+- `useCallback` для функций, передаваемых в deps
+- Избегай inline объектов/массивов в JSX
+
+3. **Типизация:**
+- Строгая типизация всех props
+- Избегай `any` (используй `unknown` если тип неизвестен)
+- Типизируй return values функций
+
+---
+
+## 🐛 Debugging & Troubleshooting
+
+### Частые Проблемы
+
+#### 1. "Cannot read property of undefined"
+```tsx
+// BAD
+const bot = bots.find(b => b.id === selectedBotId);
+console.log(bot.name); // Ошибка если не найден
+
+// GOOD
+const bot = bots.find(b => b.id === selectedBotId);
+if (!bot) return <EmptyState />;
+console.log(bot.name);
+
+// OR
+console.log(bot?.name); // Optional chaining
+```
+
+#### 2. "Rendered more hooks than during the previous render"
+Причина: Условные хуки.
+```tsx
+// BAD
+if (condition) {
+  const [state, setState] = useState(0);
+}
+
+// GOOD
+const [state, setState] = useState(0);
+if (condition) {
+  // use state
+}
+```
+
+#### 3. Бесконечный цикл useEffect
+```tsx
+// BAD - объект создается каждый рендер
+useEffect(() => {
+  api.call({ param: value });
+}, [{ param: value }]);
+
+// GOOD
+useEffect(() => {
+  api.call({ param: value });
+}, [value]);
+```
+
+#### 4. Dark Mode не работает
+```tsx
+// Проверь:
+// 1. initializeTheme() вызван в Layout
+// 2. HTML имеет class="dark"
+// 3. Tailwind config включает darkMode: 'class'
+
+// Debugging
+console.log(document.documentElement.classList); // Должен содержать 'dark'
+console.log(localStorage.getItem('theme')); // Должен быть 'dark' или 'light'
+```
+
+---
+
+## 🌐 Локализация
+
+**Текущая локаль:** Русский (`ru-RU`)
+
+```tsx
+// Даты
+formatDate(dateString); // использует 'ru-RU'
+
+// Числа (если понадобится)
+new Intl.NumberFormat('ru-RU').format(number);
+
+// Валюта (если понадобится)
+new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' }).format(amount);
+```
+
+**Правило:** Все пользовательские тексты на русском, комментарии и код — на английском.
+
+---
+
+## 🔗 Backend Integration (Будущее)
+
+### Когда Django backend будет готов:
+
+1. **API Base URL:**
+```tsx
+// services/api.ts
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+```
+
+2. **Authentication:**
+- JWT tokens в localStorage через Zustand persist
+- Interceptors для добавления Bearer token
+- Refresh token logic
+
+3. **CORS:**
+```python
+# Django settings.py
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000", # Vite dev server
+]
+```
+
+4. **WebSocket (для real-time):**
+- Django Channels для Telegram bot updates
+- Frontend: native WebSocket или socket.io-client
+
+---
+
+## 📦 Deployment
+
+### Frontend Build
+
+```bash
+cd frontend
+npm run build
+# Output: dist/
+```
+
+**Vite Build Output:**
+- Optimized bundles
+- Tree-shaking
+- Code splitting
+- Asset hashing
+
+### Environment Variables
+
+```bash
+# .env (НЕ коммитить!)
+VITE_API_URL=https://api.bot-factory.com
+VITE_GEMINI_API_KEY=your_key_here
+
+# Доступ в коде
+import.meta.env.VITE_API_URL
+```
+
+**Правило:** Все env переменные с префиксом `VITE_` для доступа в клиенте.
+
+---
+
+## 📚 Дополнительные Правила
+
+### 1. Комментарии
+
+```tsx
+// GOOD: Объясняй "почему", не "что"
+// Fix: Reset bot context to prevent crash on Knowledge page
+if (selectedBotId === 'new') {
+  setSelectedBotId(null);
+}
+
+// BAD: Очевидные комментарии
+// Set selected bot id to null
+setSelectedBotId(null);
+```
+
+### 2. Console.log
+
+```tsx
+// Development: OK
+console.log("Debug:", value);
+
+// Production: Используй console.error для ошибок
+console.error("API Error:", error);
+
+// Warning: console.warn для предупреждений
+console.warn("Deprecated function called");
+```
+
+### 3. TODO/FIXME
+
+```tsx
+// TODO: Add pagination when backend is ready
+// FIXME: Memory leak in useEffect cleanup
+// HACK: Temporary workaround for Safari bug
+// NOTE: This is intentional for backwards compatibility
+```
+
+### 4. File Size
+
+- **Компоненты:** < 300 строк (если больше — разбей на подкомпоненты)
+- **Pages:** < 400 строк
+- **Utils:** < 100 строк на файл
+
+### 5. Exports
+
+```tsx
+// Named exports для компонентов (не default)
+export const Button: React.FC<ButtonProps> = () => { ... };
+
+// Default export только для pages и App.tsx
+export default App;
+```
+
+---
+
+## 🎯 Приоритеты при Разработке
+
+1. **Type Safety** — всегда строгая типизация
+2. **User Experience** — loading states, error handling, animations
+3. **Code Readability** — чистый, понятный код > clever code
+4. **Performance** — избегай преждевременной оптимизации, но помни о best practices
+5. **Consistency** — следуй паттернам, уже существующим в кодовой базе
+
+---
+
+## 🚫 Чего НЕ делать
+
+1. **НЕ используй:**
+   - `any` тип (используй `unknown` или конкретный тип)
+   - `var` (только `const`/`let`)
+   - Inline styles (используй Tailwind)
+   - `React.createElement` (используй JSX)
+   - Class components (только функциональные)
+
+2. **НЕ коммит:**
+   - `.env` файлы
+   - `node_modules/`
+   - `dist/` build output
+   - API keys или secrets
+
+3. **НЕ создавай:**
+   - Глобальные CSS классы (используй Tailwind utilities)
+   - Огромные компоненты (>300 строк)
+   - Дублирующий код (DRY principle)
+
+---
+
+## 🎓 Learning Resources
+
+- **React 19:** https://react.dev/
+- **TypeScript:** https://www.typescriptlang.org/docs/
+- **Zustand:** https://github.com/pmndrs/zustand
+- **Framer Motion:** https://www.framer.com/motion/
+- **Tailwind CSS:** https://tailwindcss.com/docs
+- **Vite:** https://vitejs.dev/guide/
+- **Google Gemini API:** https://ai.google.dev/docs
+
+---
+
+## 📞 Контакты и Вопросы
+
+При создании нового функционала или неоднозначных ситуациях — следуй паттернам, уже существующим в кодовой базе. Consistency > Innovation.
+
+**Версия:** 1.0
+**Последнее обновление:** 2025-01-21
+
