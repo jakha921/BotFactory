@@ -1,0 +1,1373 @@
+# Bot Factory - Bot (aiogram) Cursor Rules
+
+## 📋 Обзор Проекта
+
+Bot Factory — SaaS-платформа для создания и управления AI-ботами с интеграцией Telegram и Google Gemini.
+Bot модуль на aiogram 3.x обеспечивает Telegram ботов для пользователей платформы.
+Монорепозиторий: `bot/` (aiogram) + `backend/` (Django) + `frontend/` (React).
+
+---
+
+## 🛠️ Технологический Стек Bot
+
+### Framework & Core
+- **Framework:** aiogram 3.x (async/await)
+- **Language:** Python 3.11+ (использовать последние фичи, type hints)
+- **Async Runtime:** asyncio (aiogram использует async/await)
+- **Database:** PostgreSQL 15+ (через Django ORM с asgiref.sync.sync_to_async)
+
+### Основные Библиотеки
+- **aiogram 3.x:** Async Telegram Bot API framework
+- **Django ORM:** Доступ к моделям через `asgiref.sync.sync_to_async`
+- **google-generativeai:** Google Gemini API integration (использует backend services)
+- **aiohttp / httpx:** HTTP клиент для API запросов (если нужно)
+- **python-dotenv:** Управление переменными окружения
+
+### AI & Integrations
+- **Backend Services:** Использовать backend/services/ (gemini.py, transcription.py, file_processing.py)
+- **Django API:** Интеграция с backend через HTTP API или прямые импорты
+- **Google Gemini API:** Через backend/services/gemini.py
+
+### Utilities & Development
+- **black:** Форматирование кода
+- **ruff / flake8:** Линтинг
+- **mypy:** Type checking (рекомендуется)
+- **pytest-asyncio:** Асинхронное тестирование
+
+---
+
+## 📁 Архитектура Проекта Bot
+
+```
+bot/
+├── bot_factory_bot/          # Главный пакет бота
+│   ├── __init__.py
+│   ├── config.py             # Конфигурация (settings, env vars)
+│   ├── dispatcher.py         # Настройка dispatcher и routers
+│   ├── filters.py            # Кастомные фильтры (BotOwner, Admin, etc.)
+│   ├── middleware.py         # Middleware (Logging, RateLimit, etc.)
+│   └── utils.py              # Общие утилиты
+├── handlers/                 # Обработчики сообщений и команд
+│   ├── __init__.py
+│   ├── start.py              # /start команда и начало диалога
+│   ├── chat.py               # Обработка сообщений и генерация ответов
+│   ├── commands.py           # Общие команды (/help, /settings)
+│   ├── admin.py              # Админские команды (если нужно)
+│   └── callbacks.py          # Обработка callback queries (кнопки)
+├── services/                 # Бизнес-логика и сервисы
+│   ├── __init__.py
+│   ├── bot_service.py        # Работа с Bot моделью (Django)
+│   ├── user_service.py       # Работа с TelegramUser моделью (Django)
+│   ├── chat_service.py       # Создание сессий и сообщений (Django)
+│   ├── knowledge_service.py  # Получение knowledge base для бота (Django)
+│   ├── gemini_client.py      # Клиент для Gemini API (использует backend)
+│   └── message_processor.py  # Обработка входящих сообщений (текст, аудио, файлы)
+├── keyboards/                # Inline и Reply клавиатуры
+│   ├── __init__.py
+│   ├── main.py               # Главные меню
+│   └── settings.py           # Клавиатуры настроек
+├── states/                   # FSM (Finite State Machine) состояния
+│   ├── __init__.py
+│   └── chat.py               # Состояния для чата (если нужно)
+├── integrations/             # Интеграции с backend
+│   ├── __init__.py
+│   ├── django_orm.py         # Утилиты для работы с Django ORM
+│   └── api_client.py         # HTTP клиент для backend API (если нужно)
+├── utils/                    # Утилиты
+│   ├── __init__.py
+│   ├── logging.py            # Настройка логирования
+│   ├── text_processing.py    # Обработка текста (markdown, очистка)
+│   └── rate_limiter.py       # Rate limiting для пользователей
+├── requirements/
+│   ├── base.txt              # Базовые зависимости
+│   ├── development.txt       # Dev зависимости
+│   └── production.txt        # Prod зависимости
+├── main.py                   # Entry point для запуска бота
+├── .env.example              # Пример переменных окружения
+├── .gitignore
+└── README.md
+```
+
+---
+
+## 🏗️ Паттерны Кода aiogram
+
+### 1. Dispatcher и Router Setup
+
+**Правила:**
+- Используй Router для группировки handlers
+- Регистрируй routers в dispatcher
+- Используй middleware для общих операций (логирование, rate limiting)
+
+**Пример:**
+```python
+# bot_factory_bot/dispatcher.py
+from aiogram import Dispatcher
+from aiogram.filters import Command
+from aiogram.types import Message
+from handlers.start import start_router
+from handlers.chat import chat_router
+from handlers.commands import commands_router
+from middleware import LoggingMiddleware, RateLimitMiddleware
+
+def setup_dispatcher(dp: Dispatcher) -> Dispatcher:
+    """Setup dispatcher with routers and middleware."""
+    # Register middleware (order matters!)
+    dp.message.middleware(LoggingMiddleware())
+    dp.message.middleware(RateLimitMiddleware())
+    
+    # Register routers
+    dp.include_router(start_router)
+    dp.include_router(chat_router)
+    dp.include_router(commands_router)
+    
+    return dp
+```
+
+### 2. Handlers (Обработчики)
+
+**Правила:**
+- Все handlers — async функции
+- Используй Router для группировки похожих handlers
+- Используй декораторы `@router.message()`, `@router.callback_query()`
+- Фильтруй по типам сообщений (text, audio, document, photo)
+
+**Пример:**
+```python
+# handlers/start.py
+from aiogram import Router
+from aiogram.filters import Command
+from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
+from services.bot_service import get_user_bot
+from services.user_service import get_or_create_telegram_user
+from keyboards.main import get_main_menu
+
+start_router = Router()
+
+@start_router.message(Command("start"))
+async def cmd_start(message: Message, state: FSMContext):
+    """Handle /start command."""
+    user = message.from_user
+    bot_token = message.bot.token
+    
+    # Get bot instance using Django ORM
+    bot = await get_user_bot(bot_token)
+    if not bot:
+        await message.answer("❌ Бот не найден или не активирован.")
+        return
+    
+    # Get or create Telegram user
+    telegram_user = await get_or_create_telegram_user(
+        bot=bot,
+        telegram_id=user.id,
+        username=user.username,
+        first_name=user.first_name,
+        last_name=user.last_name
+    )
+    
+    # Clear any existing state
+    await state.clear()
+    
+    # Send welcome message
+    welcome_text = f"👋 Привет, {user.first_name}!\n\n"
+    welcome_text += f"Я {bot.name}. {bot.description or 'Чем могу помочь?'}"
+    
+    await message.answer(
+        welcome_text,
+        reply_markup=get_main_menu()
+    )
+```
+
+### 3. Services (Бизнес-логика)
+
+**Правила:**
+- Выноси бизнес-логику из handlers в services
+- Используй `asgiref.sync.sync_to_async` для Django ORM операций
+- Все service функции — async
+- Обрабатывай исключения в services
+
+**Пример:**
+```python
+# services/bot_service.py
+from asgiref.sync import sync_to_async
+from typing import Optional
+from django.core.exceptions import ObjectDoesNotExist
+import os
+
+# Import Django models (нужно настроить Django settings)
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'bot_factory.settings.development')
+import django
+django.setup()
+
+from apps.bots.models import Bot
+
+@sync_to_async
+def get_user_bot(telegram_token: str) -> Optional[Bot]:
+    """
+    Get bot by telegram token.
+    
+    Args:
+        telegram_token: Telegram bot token
+        
+    Returns:
+        Bot instance or None if not found
+    """
+    try:
+        bot = Bot.objects.get(
+            telegram_token=telegram_token,
+            status='active'  # Only active bots
+        )
+        return bot
+    except ObjectDoesNotExist:
+        return None
+
+@sync_to_async
+def get_bot_knowledge_base(bot_id: str) -> dict:
+    """
+    Get knowledge base (snippets and documents) for bot.
+    
+    Args:
+        bot_id: Bot UUID
+        
+    Returns:
+        Dict with 'snippets' and 'documents' lists
+    """
+    from apps.knowledge.models import TextSnippet, Document
+    
+    bot = Bot.objects.get(id=bot_id)
+    
+    snippets = list(
+        TextSnippet.objects.filter(bot=bot).values(
+            'title', 'content', 'tags'
+        )
+    )
+    
+    documents = list(
+        Document.objects.filter(bot=bot, status='ready').values(
+            'name', 'type'
+        )
+    )
+    
+    return {
+        'snippets': snippets,
+        'documents': documents
+    }
+```
+
+### 4. Django ORM Integration
+
+**Правила:**
+- Используй `asgiref.sync.sync_to_async` для Django ORM операций
+- Настрой Django settings перед импортом моделей
+- Создай отдельный модуль для инициализации Django
+
+**Пример:**
+```python
+# integrations/django_orm.py
+import os
+import django
+from asgiref.sync import sync_to_async
+from typing import Optional, List, Dict, Any
+
+# Initialize Django
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'bot_factory.settings.development')
+django.setup()
+
+from apps.bots.models import Bot
+from apps.telegram.models import TelegramUser
+from apps.chat.models import ChatSession, ChatMessage
+from apps.knowledge.models import TextSnippet, Document
+
+# Async wrappers for Django ORM operations
+@sync_to_async
+def get_bot_by_token(telegram_token: str) -> Optional[Bot]:
+    """Get active bot by telegram token."""
+    try:
+        return Bot.objects.get(
+            telegram_token=telegram_token,
+            status='active'
+        )
+    except Bot.DoesNotExist:
+        return None
+
+@sync_to_async
+def get_or_create_telegram_user(
+    bot: Bot,
+    telegram_id: int,
+    username: Optional[str] = None,
+    first_name: str = "",
+    last_name: Optional[str] = None
+) -> TelegramUser:
+    """Get or create Telegram user."""
+    user, created = TelegramUser.objects.get_or_create(
+        telegram_id=telegram_id,
+        bot=bot,
+        defaults={
+            'username': username,
+            'first_name': first_name,
+            'last_name': last_name,
+            'status': 'active'
+        }
+    )
+    
+    # Update last_active
+    user.last_active = django.utils.timezone.now()
+    user.message_count += 1
+    user.save(update_fields=['last_active', 'message_count'])
+    
+    return user
+
+@sync_to_async
+def create_chat_session(bot: Bot, telegram_user: TelegramUser) -> ChatSession:
+    """Create new chat session."""
+    session = ChatSession.objects.create(
+        bot=bot,
+        user=telegram_user
+    )
+    return session
+
+@sync_to_async
+def save_chat_message(
+    session: ChatSession,
+    role: str,
+    content: str,
+    is_thinking: bool = False,
+    attachments: Optional[Dict[str, Any]] = None
+) -> ChatMessage:
+    """Save chat message to database."""
+    message = ChatMessage.objects.create(
+        session=session,
+        role=role,
+        content=content,
+        is_thinking=is_thinking,
+        attachments=attachments or {}
+    )
+    return message
+
+@sync_to_async
+def get_chat_history(session: ChatSession, limit: int = 10) -> List[Dict[str, str]]:
+    """Get chat history as list of {role, content} dicts."""
+    messages = ChatMessage.objects.filter(
+        session=session
+    ).order_by('-timestamp')[:limit]
+    
+    history = []
+    for msg in reversed(messages):  # Oldest first
+        history.append({
+            'role': msg.role,
+            'content': msg.content
+        })
+    
+    return history
+```
+
+### 5. Message Processing (Текст, Аудио, Файлы)
+
+**Правила:**
+- Обрабатывай разные типы входящих сообщений (text, audio, voice, document, photo)
+- Для аудио: отправляй на backend для транскрибации
+- Для файлов: отправляй на backend для обработки
+- Используй backend API endpoints или прямые импорты services
+
+**Пример:**
+```python
+# handlers/chat.py
+from aiogram import Router, F
+from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
+from services.message_processor import process_message
+from services.gemini_client import generate_bot_response
+from integrations.django_orm import (
+    get_bot_by_token,
+    get_or_create_telegram_user,
+    create_chat_session,
+    get_chat_history,
+    save_chat_message
+)
+
+chat_router = Router()
+
+@chat_router.message(F.content_type.in_(['text', 'voice', 'audio', 'document', 'photo']))
+async def handle_message(message: Message, state: FSMContext):
+    """Handle incoming messages (text, audio, files)."""
+    user = message.from_user
+    bot_token = message.bot.token
+    
+    # Get bot instance
+    bot = await get_bot_by_token(bot_token)
+    if not bot:
+        await message.answer("❌ Бот не найден или не активирован.")
+        return
+    
+    # Get or create Telegram user
+    telegram_user = await get_or_create_telegram_user(
+        bot=bot,
+        telegram_id=user.id,
+        username=user.username,
+        first_name=user.first_name,
+        last_name=user.last_name
+    )
+    
+    # Check if user is blocked
+    if telegram_user.status == 'blocked':
+        await message.answer("❌ Вы заблокированы. Обратитесь к администратору.")
+        return
+    
+    # Get or create chat session
+    session = await state.get_data()
+    if not session.get('chat_session_id'):
+        # Create new session
+        chat_session = await create_chat_session(bot, telegram_user)
+        await state.update_data(chat_session_id=str(chat_session.id))
+    else:
+        from apps.chat.models import ChatSession
+        chat_session = await sync_to_async(ChatSession.objects.get)(
+            id=session['chat_session_id']
+        )
+    
+    # Show "typing..." indicator
+    await message.bot.send_chat_action(message.chat.id, "typing")
+    
+    try:
+        # Process message (extract text from text/audio/files)
+        processed_content = await process_message(
+            message=message,
+            bot=bot
+        )
+        
+        # Save user message
+        await save_chat_message(
+            session=chat_session,
+            role='user',
+            content=processed_content,
+            attachments={
+                'has_audio': message.voice is not None or message.audio is not None,
+                'has_document': message.document is not None,
+                'has_photo': message.photo is not None
+            }
+        )
+        
+        # Get chat history
+        history = await get_chat_history(chat_session, limit=10)
+        
+        # Generate bot response using Gemini
+        response = await generate_bot_response(
+            bot=bot,
+            prompt=processed_content,
+            history=history
+        )
+        
+        # Save bot response
+        await save_chat_message(
+            session=chat_session,
+            role='model',
+            content=response['text'],
+            is_thinking=False,
+            attachments={
+                'grounding_chunks': response.get('groundingChunks', [])
+            }
+        )
+        
+        # Send response
+        await message.answer(response['text'])
+        
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error processing message: {str(e)}", exc_info=True)
+        await message.answer("❌ Произошла ошибка при обработке сообщения. Попробуйте позже.")
+```
+
+### 6. Message Processor Service
+
+**Правила:**
+- Выноси логику обработки разных типов сообщений в отдельный service
+- Для аудио: используй backend transcription service
+- Для файлов: используй backend file_processing service
+
+**Пример:**
+```python
+# services/message_processor.py
+from aiogram.types import Message
+from typing import Optional
+import aiohttp
+import os
+
+DJANGO_API_URL = os.getenv('DJANGO_API_URL', 'http://localhost:8000/api/v1')
+
+async def process_message(message: Message, bot) -> str:
+    """
+    Process incoming message and extract text content.
+    
+    Handles:
+    - Text messages: return text directly
+    - Audio/Voice: transcribe using backend API
+    - Files/Documents: extract text using backend API
+    - Photos: extract text using OCR (if needed)
+    
+    Returns:
+        Processed text content
+    """
+    if message.text:
+        return message.text
+    
+    if message.voice or message.audio:
+        # Download audio file
+        file = message.voice or message.audio
+        file_info = await message.bot.get_file(file.file_id)
+        
+        # Download file content
+        audio_bytes = await message.bot.download_file(file_info.file_path)
+        
+        # Send to backend for transcription
+        async with aiohttp.ClientSession() as session:
+            form_data = aiohttp.FormData()
+            form_data.add_field('audio_file', audio_bytes, filename='voice.ogg')
+            form_data.add_field('audio_format', 'ogg')
+            
+            async with session.post(
+                f'{DJANGO_API_URL}/chat/transcribe/',
+                data=form_data,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    return result.get('text', '')
+                else:
+                    error = await response.json()
+                    raise Exception(f"Transcription failed: {error.get('error', 'Unknown error')}")
+    
+    if message.document:
+        # Download document
+        file_info = await message.bot.get_file(message.document.file_id)
+        file_bytes = await file_info.read()
+        
+        # Send to backend for processing
+        async with aiohttp.ClientSession() as session:
+            form_data = aiohttp.FormData()
+            form_data.add_field('file', file_bytes, filename=message.document.file_name)
+            
+            async with session.post(
+                f'{DJANGO_API_URL}/chat/process-file/',
+                data=form_data,
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    return result.get('text', '')
+                else:
+                    error = await response.json()
+                    raise Exception(f"File processing failed: {error.get('error', 'Unknown error')}")
+    
+    if message.photo:
+        # For photos, return caption or placeholder
+        return message.caption or "[Изображение]"
+    
+    return ""
+```
+
+### 7. Gemini Client Integration
+
+**Правила:**
+- Используй backend/services/gemini.py для генерации ответов
+- Можно импортировать напрямую или использовать через API
+- Передавай bot configuration (system_instruction, temperature, thinking_budget)
+
+**Пример:**
+```python
+# services/gemini_client.py
+from typing import List, Dict, Optional
+import os
+import sys
+
+# Add backend to path for imports
+backend_path = os.path.join(os.path.dirname(__file__), '..', '..', 'backend')
+sys.path.insert(0, backend_path)
+
+# Initialize Django
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'bot_factory.settings.development')
+import django
+django.setup()
+
+from services.gemini import get_gemini_service
+from services.knowledge_service import get_bot_knowledge_base
+
+async def generate_bot_response(
+    bot,
+    prompt: str,
+    history: List[Dict[str, str]] = None
+) -> Dict[str, str]:
+    """
+    Generate bot response using Gemini API.
+    
+    Args:
+        bot: Bot model instance
+        prompt: User prompt
+        history: Chat history as list of {role, content} dicts
+        
+    Returns:
+        Dict with 'text' and optional 'groundingChunks'
+    """
+    # Get knowledge base for bot
+    knowledge_base = await get_bot_knowledge_base(str(bot.id))
+    
+    # Build system instruction with knowledge base
+    system_instruction = bot.system_instruction or "You are a helpful AI assistant."
+    
+    if knowledge_base['snippets'] or knowledge_base['documents']:
+        knowledge_context = []
+        
+        # Add snippets
+        if knowledge_base['snippets']:
+            knowledge_context.append("\n\n## 📚 Knowledge Base:")
+            for snippet in knowledge_base['snippets']:
+                knowledge_context.append(f"\n### {snippet['title']}")
+                knowledge_context.append(snippet['content'])
+                if snippet.get('tags'):
+                    knowledge_context.append(f"Tags: {', '.join(snippet['tags'])}")
+        
+        # Add document summaries
+        if knowledge_base['documents']:
+            knowledge_context.append("\n\n## 📄 Available Documents:")
+            for doc in knowledge_base['documents']:
+                knowledge_context.append(f"- {doc['name']} ({doc['type']})")
+        
+        system_instruction = f"{system_instruction}\n\n{''.join(knowledge_context)}"
+    
+    # Use sync_to_async for Django service
+    from asgiref.sync import sync_to_async
+    
+    @sync_to_async
+    def _generate_response():
+        gemini_service = get_gemini_service()
+        return gemini_service.generate_response(
+            model_name=bot.model or 'gemini-2.5-flash',
+            prompt=prompt,
+            system_instruction=system_instruction,
+            history=history or [],
+            thinking_budget=bot.thinking_budget,
+            temperature=bot.temperature or 0.7
+        )
+    
+    result = await _generate_response()
+    return result
+```
+
+### 8. Filters (Кастомные фильтры)
+
+**Правила:**
+- Создавай кастомные фильтры для проверки прав доступа
+- Используй фильтры для проверки ownership бота
+
+**Пример:**
+```python
+# bot_factory_bot/filters.py
+from aiogram.filters import BaseFilter
+from aiogram.types import Message
+from integrations.django_orm import get_bot_by_token
+from typing import Optional
+
+class ActiveBotFilter(BaseFilter):
+    """Filter to check if bot is active."""
+    
+    async def __call__(self, message: Message) -> bool:
+        """Check if bot is active."""
+        bot_token = message.bot.token
+        bot = await get_bot_by_token(bot_token)
+        return bot is not None
+
+class UserNotBlockedFilter(BaseFilter):
+    """Filter to check if user is not blocked."""
+    
+    async def __call__(self, message: Message) -> bool:
+        """Check if user is not blocked."""
+        from integrations.django_orm import get_or_create_telegram_user
+        from integrations.django_orm import get_bot_by_token
+        
+        bot_token = message.bot.token
+        bot = await get_bot_by_token(bot_token)
+        if not bot:
+            return False
+        
+        telegram_user = await get_or_create_telegram_user(
+            bot=bot,
+            telegram_id=message.from_user.id,
+            first_name=message.from_user.first_name
+        )
+        
+        return telegram_user.status == 'active'
+```
+
+### 9. Middleware
+
+**Правила:**
+- Используй middleware для логирования, rate limiting, error handling
+- Регистрируй middleware в правильном порядке
+
+**Пример:**
+```python
+# bot_factory_bot/middleware.py
+from typing import Callable, Dict, Any, Awaitable
+from aiogram import BaseMiddleware
+from aiogram.types import TelegramObject
+import logging
+import time
+from collections import defaultdict
+
+logger = logging.getLogger(__name__)
+
+class LoggingMiddleware(BaseMiddleware):
+    """Middleware for logging all updates."""
+    
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: Dict[str, Any]
+    ) -> Any:
+        """Log update before handling."""
+        start_time = time.time()
+        
+        # Log update
+        logger.info(f"Update received: {type(event).__name__}")
+        
+        try:
+            result = await handler(event, data)
+            elapsed = time.time() - start_time
+            logger.info(f"Update processed in {elapsed:.2f}s")
+            return result
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"Error processing update after {elapsed:.2f}s: {str(e)}", exc_info=True)
+            raise
+
+class RateLimitMiddleware(BaseMiddleware):
+    """Middleware for rate limiting user messages."""
+    
+    def __init__(self, max_messages: int = 10, window: int = 60):
+        """
+        Args:
+            max_messages: Maximum messages per window
+            window: Time window in seconds
+        """
+        self.max_messages = max_messages
+        self.window = window
+        self.user_messages: Dict[int, list] = defaultdict(list)
+    
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: Dict[str, Any]
+    ) -> Any:
+        """Rate limit check."""
+        if hasattr(event, 'from_user') and event.from_user:
+            user_id = event.from_user.id
+            current_time = time.time()
+            
+            # Clean old messages
+            self.user_messages[user_id] = [
+                msg_time for msg_time in self.user_messages[user_id]
+                if current_time - msg_time < self.window
+            ]
+            
+            # Check rate limit
+            if len(self.user_messages[user_id]) >= self.max_messages:
+                if hasattr(event, 'answer'):
+                    await event.answer(
+                        f"⏳ Слишком много запросов. Подождите {self.window} секунд."
+                    )
+                return
+            
+            # Add current message
+            self.user_messages[user_id].append(current_time)
+        
+        return await handler(event, data)
+```
+
+### 10. Keyboards (Клавиатуры)
+
+**Правила:**
+- Используй InlineKeyboardBuilder для inline кнопок
+- Используй ReplyKeyboardMarkup для постоянных кнопок
+- Группируй клавиатуры по функциональности
+
+**Пример:**
+```python
+# keyboards/main.py
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+def get_main_menu() -> InlineKeyboardMarkup:
+    """Get main menu keyboard."""
+    builder = InlineKeyboardBuilder()
+    builder.add(InlineKeyboardButton(text="💬 Начать чат", callback_data="start_chat"))
+    builder.add(InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings"))
+    builder.add(InlineKeyboardButton(text="ℹ️ Помощь", callback_data="help"))
+    builder.adjust(1)  # One button per row
+    return builder.as_markup()
+
+def get_settings_menu() -> InlineKeyboardMarkup:
+    """Get settings menu keyboard."""
+    builder = InlineKeyboardBuilder()
+    builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu"))
+    return builder.as_markup()
+```
+
+### 11. FSM States (Состояния)
+
+**Правила:**
+- Используй FSM для многошаговых диалогов
+- Группируй состояния по функциональности
+
+**Пример:**
+```python
+# states/chat.py
+from aiogram.fsm.state import State, StatesGroup
+
+class ChatStates(StatesGroup):
+    """Chat FSM states."""
+    waiting_for_message = State()
+    processing_response = State()
+```
+
+---
+
+## 🔗 Интеграция с Django Backend
+
+### 1. Django Settings Setup
+
+**Правила:**
+- Настраивай Django settings перед импортом моделей
+- Используй те же settings, что и в backend
+- Создай отдельный модуль для инициализации Django
+
+**Пример:**
+```python
+# integrations/django_setup.py
+import os
+import sys
+import django
+from pathlib import Path
+
+def setup_django():
+    """Setup Django for bot usage."""
+    # Get backend directory
+    backend_dir = Path(__file__).resolve().parent.parent.parent / 'backend'
+    
+    # Add backend to path
+    sys.path.insert(0, str(backend_dir))
+    
+    # Set Django settings
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'bot_factory.settings.development')
+    
+    # Initialize Django
+    django.setup()
+```
+
+### 2. Django ORM Access
+
+**Правила:**
+- Всегда используй `sync_to_async` для Django ORM операций
+- Создавай async wrappers для часто используемых операций
+- Обрабатывай исключения (ObjectDoesNotExist, etc.)
+
+### 3. Backend Services Usage
+
+**Правила:**
+- Можно импортировать backend services напрямую
+- Используй `sync_to_async` для вызова sync функций
+- Для HTTP API: используй aiohttp или httpx
+
+---
+
+## 🔒 Безопасность
+
+### 1. Token Security
+
+**Правила:**
+- Храни telegram tokens в переменных окружения
+- Не логируй токены
+- Валидируй токены перед использованием
+
+### 2. User Authentication
+
+**Правила:**
+- Проверяй статус пользователя (active/blocked) перед обработкой сообщений
+- Ограничивай доступ к админским функциям
+- Используй rate limiting для защиты от спама
+
+### 3. Error Handling
+
+**Правила:**
+- Обрабатывай все исключения
+- Не раскрывай внутренние ошибки пользователям
+- Логируй ошибки для debugging
+
+---
+
+## 📝 Naming Conventions
+
+### Python
+
+- **Классы:** PascalCase (`BotService`, `MessageProcessor`)
+- **Функции/методы:** snake_case (`get_user_bot`, `process_message`)
+- **Константы:** UPPER_SNAKE_CASE (`MAX_MESSAGE_LENGTH`)
+- **Приватные методы:** с префиксом `_` (`_internal_method`)
+
+### aiogram
+
+- **Routers:** snake_case + `_router` (`start_router`, `chat_router`)
+- **Handlers:** snake_case (`cmd_start`, `handle_message`)
+- **Filters:** PascalCase + Filter (`ActiveBotFilter`)
+- **Middleware:** PascalCase + Middleware (`LoggingMiddleware`)
+
+### Files
+
+- `handlers/`, `services/`, `keyboards/` — стандартные директории
+- `models.py`, `views.py` — только в Django apps
+- `config.py`, `dispatcher.py` — в главном пакете бота
+
+---
+
+## 🧪 Тестирование
+
+### Структура тестов
+
+```python
+# tests/test_handlers.py
+import pytest
+from aiogram.types import Message, User, Chat
+from handlers.start import cmd_start
+
+@pytest.mark.asyncio
+async def test_cmd_start():
+    """Test /start command handler."""
+    # Mock message
+    message = Message(
+        message_id=1,
+        date=1234567890,
+        chat=Chat(id=1, type="private"),
+        from_user=User(id=1, is_bot=False, first_name="Test")
+    )
+    
+    # Test handler
+    # ...
+```
+
+---
+
+## 🚀 Deployment
+
+### Environment Variables
+
+```bash
+# .env
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+DJANGO_API_URL=http://localhost:8000/api/v1
+DJANGO_SETTINGS_MODULE=bot_factory.settings.production
+LOG_LEVEL=INFO
+```
+
+### Running Bot
+
+```python
+# main.py
+import asyncio
+import logging
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from bot_factory_bot.config import BOT_TOKEN
+from bot_factory_bot.dispatcher import setup_dispatcher
+from integrations.django_setup import setup_django
+
+# Setup Django
+setup_django()
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+async def main():
+    """Main function to run bot."""
+    # Initialize bot
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
+    
+    # Initialize dispatcher
+    dp = Dispatcher()
+    dp = setup_dispatcher(dp)
+    
+    # Start polling
+    await dp.start_polling(bot)
+
+if __name__ == '__main__':
+    asyncio.run(main())
+```
+
+---
+
+## 🎯 Best Practices
+
+### 1. Code Quality
+
+- Используй type hints для всех функций
+- Используй docstrings для всех классов и функций
+- Следуй PEP 8
+- Используй `black` для форматирования
+- Используй `ruff` или `flake8` для линтинга
+
+### 2. Performance
+
+- Используй `sync_to_async` правильно (не блокируй event loop)
+- Используй connection pooling для HTTP клиентов
+- Кэшируй часто используемые данные (bot config, knowledge base)
+- Используй rate limiting для защиты от спама
+
+### 3. Error Handling
+
+- Всегда обрабатывай исключения
+- Логируй ошибки с контекстом
+- Предоставляй понятные сообщения пользователям
+
+### 4. Testing
+
+- Пиши тесты для handlers
+- Используй mocks для внешних зависимостей
+- Тестируй интеграцию с Django ORM
+
+---
+
+## 📚 Дополнительные Правила
+
+### 1. Импорты
+
+```python
+# Порядок импортов:
+# 1. Standard library
+import os
+import logging
+from typing import Optional, List, Dict
+
+# 2. Third party
+from aiogram import Router, F
+from aiogram.types import Message
+from aiogram.filters import Command
+
+# 3. Django (после setup_django)
+import django
+from apps.bots.models import Bot
+
+# 4. Local imports
+from services.bot_service import get_user_bot
+from keyboards.main import get_main_menu
+```
+
+### 2. Логирование
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Используй разные уровни
+logger.debug("Debug message")
+logger.info("Info message")
+logger.warning("Warning message")
+logger.error("Error message", exc_info=True)
+```
+
+### 3. Async/Await
+
+```python
+# Всегда используй await для async функций
+result = await async_function()
+
+# Не блокируй event loop
+# BAD: time.sleep(5)
+# GOOD: await asyncio.sleep(5)
+
+# Используй sync_to_async для Django ORM
+from asgiref.sync import sync_to_async
+result = await sync_to_async(DjangoModel.objects.get)(id=1)
+```
+
+---
+
+## 🔗 Интеграция с Backend Services
+
+### Использование Backend Services
+
+**Вариант 1: Прямой импорт (рекомендуется)**
+```python
+# После setup_django()
+from services.gemini import get_gemini_service
+from services.transcription import transcribe_audio
+from services.file_processing import extract_text_from_file
+
+# Использование через sync_to_async
+@sync_to_async
+def _generate_response(...):
+    service = get_gemini_service()
+    return service.generate_response(...)
+
+result = await _generate_response(...)
+```
+
+**Вариант 2: HTTP API**
+```python
+import aiohttp
+
+async def generate_response_via_api(...):
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            f'{DJANGO_API_URL}/chat/generate/',
+            json={...},
+            timeout=aiohttp.ClientTimeout(total=60)
+        ) as response:
+            return await response.json()
+```
+
+---
+
+## 🎨 Dynamic UI Configuration
+
+### Обзор
+
+Bot поддерживает динамическую генерацию UI элементов (inline keyboards, формы) на основе конфигурации из Django backend. Конфигурация хранится в Bot модели и доступна через API endpoints.
+
+### Структура UI Конфигурации
+
+**В Bot модели (Django):**
+- `ui_config` (JSONField): Общая UI конфигурация
+- `default_inline_keyboard` (JSONField): Дефолтная inline клавиатура
+- `welcome_message` (TextField): Приветственное сообщение для /start
+- `help_message` (TextField): Сообщение для /help
+
+**JSON структура для inline keyboards:**
+```json
+{
+  "inline_keyboards": {
+    "main_menu": [
+      [
+        {"text": "💬 Начать чат", "callback_data": "action_start_chat"},
+        {"text": "⚙️ Настройки", "callback_data": "action_settings"}
+      ],
+      [
+        {"text": "ℹ️ Помощь", "callback_data": "action_help"},
+        {"text": "🌐 Сайт", "url": "https://example.com"}
+      ]
+    ]
+  }
+}
+```
+
+**JSON структура для форм:**
+```json
+{
+  "forms": {
+    "feedback": {
+      "name": "Feedback Form",
+      "steps": [
+        {
+          "field": "name",
+          "type": "text",
+          "prompt": "Введите ваше имя:",
+          "required": true,
+          "validation": {"min_length": 2, "max_length": 50}
+        },
+        {
+          "field": "rating",
+          "type": "choice",
+          "prompt": "Оцените бота (1-5):",
+          "options": ["1", "2", "3", "4", "5"],
+          "required": true
+        }
+      ],
+      "submit_handler": "save_feedback"
+    }
+  }
+}
+```
+
+### Использование Dynamic Keyboards
+
+**Получение клавиатуры из конфигурации:**
+```python
+from bot.keyboards.dynamic import get_dynamic_keyboard, get_main_menu_keyboard
+
+# Получить главное меню
+keyboard = await get_main_menu_keyboard(bot_token)
+
+# Получить любую клавиатуру по имени
+keyboard = await get_dynamic_keyboard(bot_id, 'settings_menu')
+
+# Отправить сообщение с клавиатурой
+await message.answer("Выберите действие:", reply_markup=keyboard)
+```
+
+**Создание клавиатуры из JSON:**
+```python
+from bot.utils.keyboard_builder import build_inline_keyboard
+
+# Конфигурация клавиатуры (из Bot.ui_config)
+config = [
+    [{"text": "Button 1", "callback_data": "action1"}],
+    [{"text": "Button 2", "url": "https://example.com"}]
+]
+
+keyboard = build_inline_keyboard(config)
+```
+
+### Использование Dynamic Forms
+
+**Запуск формы из конфигурации:**
+```python
+from bot.handlers.forms import start_form
+
+# Запустить форму
+await start_form(message, state, bot_token, 'feedback')
+```
+
+**Обработка callback для запуска формы:**
+```python
+@callbacks_router.callback_query(F.data == "action_form_feedback")
+async def start_feedback_form(callback: CallbackQuery, state: FSMContext):
+    from bot.handlers.forms import start_form
+    await start_form(callback.message, state, callback.bot.token, 'feedback')
+```
+
+**Структура формы в handlers:**
+```python
+# Форма автоматически использует FSM States из конфигурации
+# Каждый шаг формы соответствует одному State
+# Данные формы сохраняются в state.data['form_data']
+```
+
+### UIConfigService
+
+**Кэширование конфигурации:**
+```python
+from bot.services.ui_config_service import get_ui_config_service
+
+ui_service = get_ui_config_service()
+
+# Получить UI конфигурацию (с кэшированием)
+config = await ui_service.get_ui_config(bot_id)
+
+# Получить клавиатуру
+keyboard_config = await ui_service.get_keyboard(bot_id, 'main_menu')
+
+# Получить форму
+form_config = await ui_service.get_form(bot_id, 'feedback')
+
+# Принудительно обновить кэш
+await ui_service.refresh_config(bot_id)
+
+# Очистить кэш
+ui_service.clear_cache(bot_id)
+```
+
+### Интеграция с Handlers
+
+**start.py - использование динамического welcome_message и keyboard:**
+```python
+from bot.integrations.django_orm import get_bot_by_token
+from bot.keyboards.dynamic import get_main_menu_keyboard
+
+@start_router.message(CommandStart())
+async def cmd_start(message: Message, state: FSMContext):
+    bot = await get_bot_by_token(message.bot.token)
+    welcome_text = bot.welcome_message or "👋 Привет!"
+    keyboard = await get_main_menu_keyboard(message.bot.token)
+    
+    await message.answer(welcome_text, reply_markup=keyboard)
+```
+
+**callbacks.py - обработка динамических callback_data:**
+```python
+@callbacks_router.callback_query(F.data.startswith("action_"))
+async def handle_dynamic_action(callback: CallbackQuery, state: FSMContext):
+    action = callback.data
+    
+    if action == "action_start_chat":
+        await callback.message.answer("💬 Начнем чат!")
+    elif action.startswith("action_form_"):
+        form_name = action.replace("action_form_", "")
+        from bot.handlers.forms import start_form
+        await start_form(callback.message, state, callback.bot.token, form_name)
+```
+
+### Валидация UI Конфигурации
+
+**Backend валидация (Django):**
+- UIConfigSerializer проверяет структуру конфигурации
+- Валидирует inline_keyboards и forms структуру
+- Проверяет обязательные поля в кнопках и шагах форм
+
+**Frontend валидация:**
+- Проверка структуры перед отправкой на backend
+- Визуальный редактор для создания keyboards и форм
+
+### Best Practices
+
+1. **Кэширование:** Используй UIConfigService для кэширования конфигурации (TTL: 5 минут)
+2. **Fallback:** Всегда предоставляй fallback значения (default keyboard, default messages)
+3. **Валидация:** Валидируй пользовательский ввод в формах используя validate_form_step
+4. **Именование:** Используй понятные имена для keyboards и форм (main_menu, settings_menu, feedback_form)
+5. **Обработка ошибок:** Обрабатывай случаи, когда конфигурация не найдена или невалидна
+
+---
+
+---
+
+## 🎓 Learning Resources
+
+- **aiogram 3.x:** https://docs.aiogram.dev/
+- **Django ORM:** https://docs.djangoproject.com/en/stable/topics/db/
+- **asgiref:** https://github.com/django/asgiref
+- **Python Async:** https://docs.python.org/3/library/asyncio.html
+
+---
+
+## 📞 Контакты и Вопросы
+
+При создании нового функционала или неоднозначных ситуациях — следуй паттернам, уже существующим в кодовой базе. Consistency > Innovation.
+
+---
+
+## 📦 Новые Модули (Dynamic UI Integration)
+
+### integrations/
+- **django_setup.py**: Инициализация Django для bot
+- **django_orm.py**: Async wrappers для Django ORM операций
+
+### services/
+- **ui_config_service.py**: Сервис для работы с UI конфигурацией (кэширование, получение)
+
+### utils/
+- **keyboard_builder.py**: Утилиты для генерации inline/reply keyboards из JSON
+- **form_builder.py**: Утилиты для парсинга и валидации форм из JSON
+
+### keyboards/
+- **dynamic.py**: Функции для получения динамических keyboards из конфигурации
+
+### states/
+- **dynamic_forms.py**: Динамические FSM States для форм из конфигурации
+
+### handlers/
+- **start.py**: /start handler с динамическим welcome_message и keyboard
+- **commands.py**: /help handler с динамическим help_message
+- **callbacks.py**: Обработка динамических callback queries
+- **forms.py**: Универсальный handler для динамических форм
+
+---
+
+**Версия:** 1.1
+**Последнее обновление:** 2025-01-23
+**Добавлено:** Dynamic UI Configuration (keyboards, forms)

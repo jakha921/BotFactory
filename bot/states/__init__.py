@@ -1,0 +1,4 @@
+"""
+FSM States for bot.
+"""
+

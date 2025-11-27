@@ -1,0 +1,223 @@
+"""
+Views for accounts app.
+Authentication views for Bot Factory API.
+"""
+from rest_framework import status, generics, viewsets
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import check_password
+
+from apps.accounts.serializers import (
+    UserSerializer,
+    UserRegisterSerializer,
+    UserUpdateSerializer,
+)
+from rest_framework.exceptions import AuthenticationFailed, ValidationError as DRFValidationError
+from apps.bots.models import Bot
+from apps.knowledge.models import Document
+
+User = get_user_model()
+
+
+class RegisterView(generics.CreateAPIView):
+    """
+    User registration endpoint.
+    
+    POST /api/v1/auth/register/
+    """
+    queryset = User.objects.all()
+    permission_classes = [AllowAny]
+    serializer_class = UserRegisterSerializer
+    
+    def create(self, request, *args, **kwargs):
+        """Create a new user and return JWT tokens."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        
+        # Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
+        
+        return Response({
+            'user': UserSerializer(user).data,
+            'tokens': {
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+            }
+        }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def login_view(request):
+    """
+    User login endpoint.
+    
+    POST /api/v1/auth/login/
+    Body: { "email": "user@example.com", "password": "password123" }
+    """
+    email = request.data.get('email')
+    password = request.data.get('password')
+    
+    if not email or not password:
+        raise DRFValidationError({
+            'email': 'Email and password are required.',
+            'password': 'Email and password are required.'
+        })
+    
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        raise AuthenticationFailed({
+            'message': 'Invalid email or password.',
+            'code': 'invalid_credentials'
+        })
+    
+    if not check_password(password, user.password):
+        raise AuthenticationFailed({
+            'message': 'Invalid email or password.',
+            'code': 'invalid_credentials'
+        })
+    
+    if not user.is_active:
+        raise AuthenticationFailed({
+            'message': 'User account is disabled.',
+            'code': 'account_disabled'
+        })
+    
+    # Generate JWT tokens
+    refresh = RefreshToken.for_user(user)
+    
+    return Response({
+        'user': UserSerializer(user).data,
+        'tokens': {
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+        }
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def logout_view(request):
+    """
+    User logout endpoint.
+    
+    POST /api/v1/auth/logout/
+    Body: { "refresh": "refresh_token_string" }
+    """
+    try:
+        refresh_token = request.data.get('refresh')
+        if refresh_token:
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+    except Exception as e:
+        # Token might already be blacklisted or invalid
+        # Still return success to prevent token leakage
+        pass
+    
+    return Response({
+        'message': 'Successfully logged out.'
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_me_view(request):
+    """
+    Get current user endpoint.
+    
+    GET /api/v1/auth/me/
+    """
+    serializer = UserSerializer(request.user)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def user_update_view(request):
+    """
+    Update current user endpoint.
+    
+    PUT/PATCH /api/v1/auth/me/update/
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f'User update request from {request.user.email}. Data: {request.data}')
+    logger.info(f'Current user telegram_id before update: {request.user.telegram_id}')
+    
+    serializer = UserUpdateSerializer(request.user, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    
+    logger.info(f'Validated data: {serializer.validated_data}')
+    
+    updated_user = serializer.save()
+    
+    # Refresh from database to get latest values
+    updated_user.refresh_from_db()
+    
+    logger.info(f'User telegram_id after update: {updated_user.telegram_id}')
+    
+    return Response(UserSerializer(updated_user).data, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def subscription_usage_view(request):
+    """
+    Get subscription usage endpoint.
+    
+    GET /api/v1/subscription/
+    Returns subscription plan and usage statistics.
+    """
+    user = request.user
+    
+    # Get usage statistics
+    bots_count = Bot.objects.filter(owner=user).count()
+    documents_count = Document.objects.filter(bot__owner=user).count()
+    # API calls count would need to be tracked separately
+    api_calls_count = 0  # placeholder
+    
+    # Define plan limits
+    plan_limits = {
+        'Free': {
+            'bots': 1,
+            'documents': 10,
+            'apiCalls': 100
+        },
+        'Pro': {
+            'bots': 5,
+            'documents': 500,
+            'apiCalls': 10000
+        },
+        'Enterprise': {
+            'bots': float('inf'),  # unlimited
+            'documents': 10000,
+            'apiCalls': 100000
+        }
+    }
+    
+    limits = plan_limits.get(user.plan, plan_limits['Free'])
+    
+    response_data = {
+        'plan': user.plan,
+        'renewalDate': None,  # Would need subscription tracking
+        'bots': {
+            'used': bots_count,
+            'limit': limits['bots'] if limits['bots'] != float('inf') else None
+        },
+        'documents': {
+            'used': documents_count,
+            'limit': limits['documents']
+        },
+        'apiCalls': {
+            'used': api_calls_count,
+            'limit': limits['apiCalls']
+        }
+    }
+    
+    return Response(response_data, status=status.HTTP_200_OK)

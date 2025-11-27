@@ -1,0 +1,768 @@
+# Bot Factory - Backend Cursor Rules (Django)
+
+## 📋 Обзор Проекта
+
+Bot Factory — SaaS-платформа для создания и управления AI-ботами с интеграцией Telegram и Google Gemini.
+Backend на Django REST Framework, обеспечивающий REST API для frontend (React/TypeScript).
+Монорепозиторий: `backend/` (Django) + `frontend/` (React).
+
+---
+
+## 🛠️ Технологический Стек Backend
+
+### Framework & Core
+- **Framework:** Django 5.0+ (LTS)
+- **API Framework:** Django REST Framework (DRF) 3.15+
+- **Database:** PostgreSQL 15+
+- **Python Version:** 3.11+ (использовать последние фичи)
+
+### Основные Библиотеки
+- **DRF:** REST API, serializers, viewsets, permissions
+- **djangorestframework-simplejwt:** JWT аутентификация
+- **psycopg2-binary:** PostgreSQL драйвер
+- **python-dotenv:** Управление переменными окружения
+- **celery:** Асинхронные задачи (планируется)
+- **redis:** Кэширование и Celery broker (планируется)
+
+### AI & Integrations
+- **google-generativeai:** Google Gemini API integration
+- **python-telegram-bot:** Telegram Bot API wrapper
+- **requests:** HTTP клиент для внешних API
+
+### Utilities & Testing
+- **pytest-django:** Тестирование
+- **black:** Форматирование кода
+- **flake8 / ruff:** Линтинг
+- **mypy:** Type checking (опционально)
+- **factory-boy:** Тестовые фикстуры
+
+---
+
+## 📁 Архитектура Проекта
+
+```
+backend/
+├── bot_factory/              # Главный Django проект
+│   ├── settings/
+│   │   ├── base.py          # Базовые настройки
+│   │   ├── development.py   # Dev настройки
+│   │   ├── production.py    # Prod настройки
+│   │   └── __init__.py
+│   ├── urls.py              # Root URLconf
+│   ├── wsgi.py
+│   └── asgi.py              # Для WebSocket (планируется)
+├── apps/                     # Django приложения
+│   ├── accounts/            # Пользователи и аутентификация
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── views.py
+│   │   ├── permissions.py
+│   │   └── urls.py
+│   ├── bots/                # Управление ботами
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── views.py
+│   │   ├── services.py      # Бизнес-логика
+│   │   └── urls.py
+│   ├── knowledge/           # База знаний (документы и snippets)
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── views.py
+│   │   └── urls.py
+│   ├── chat/                # Чат-сессии и сообщения
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── views.py
+│   │   └── urls.py
+│   ├── analytics/           # Статистика и аналитика
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── views.py
+│   │   └── services.py
+│   └── telegram/            # Telegram интеграция
+│       ├── models.py
+│       ├── services.py      # Telegram bot handlers
+│       ├── views.py         # Webhook endpoints
+│       └── urls.py
+├── core/                     # Общие утилиты
+│   ├── permissions.py       # Кастомные permissions
+│   ├── mixins.py            # Reusable mixins
+│   ├── pagination.py        # Кастомная пагинация
+│   ├── exceptions.py        # Кастомные исключения
+│   └── utils.py             # Общие утилиты
+├── services/                # Внешние сервисы
+│   ├── gemini.py            # Google Gemini integration
+│   ├── telegram.py          # Telegram bot service
+│   └── ai_base.py           # Базовый AI service
+├── tests/                    # Общие тесты
+├── requirements/
+│   ├── base.txt
+│   ├── development.txt
+│   └── production.txt
+├── manage.py
+├── .env.example
+├── .gitignore
+└── README.md
+```
+
+---
+
+## 🏗️ Паттерны Кода Django
+
+### 1. Models (models.py)
+
+**Правила:**
+- Все модели наследуются от `models.Model`
+- Используй `django.utils.timezone.now` для дат
+- Добавляй `__str__` и `__repr__` методы
+- Используй `Meta` класс для `verbose_name`, `ordering`, `indexes`
+- UUID для первичных ключей в API моделях (по желанию)
+- Используй `related_name` для reverse relations
+
+**Пример:**
+```python
+from django.db import models
+from django.utils import timezone
+import uuid
+
+class Bot(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.CASCADE,
+        related_name='bots'
+    )
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ('draft', 'Draft'),
+            ('active', 'Active'),
+            ('paused', 'Paused'),
+            ('error', 'Error'),
+        ],
+        default='draft'
+    )
+    model = models.CharField(max_length=100)  # gemini-2.5-flash, gpt-4, etc.
+    provider = models.CharField(
+        max_length=20,
+        choices=[('gemini', 'Gemini'), ('openai', 'OpenAI'), ('anthropic', 'Anthropic')],
+        default='gemini'
+    )
+    temperature = models.FloatField(default=0.7)
+    system_instruction = models.TextField(blank=True)
+    thinking_budget = models.IntegerField(null=True, blank=True)  # For Gemini thinking models
+    telegram_token = models.CharField(max_length=200, blank=True)
+    avatar = models.CharField(max_length=200, blank=True)  # Emoji or URL
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Bot'
+        verbose_name_plural = 'Bots'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['owner', 'status']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.owner.email})"
+
+    @property
+    def conversations_count(self):
+        return self.chat_sessions.count()
+
+    @property
+    def documents_count(self):
+        return self.documents.count()
+```
+
+### 2. Serializers (serializers.py)
+
+**Правила:**
+- Используй `ModelSerializer` для простых случаев
+- Создавай отдельные `CreateSerializer` и `UpdateSerializer` если нужны разные поля
+- Валидация в методах `validate_<field>` или `validate()`
+- Используй `SerializerMethodField` для computed полей
+- Вложенные serializers для related objects
+
+**Пример:**
+```python
+from rest_framework import serializers
+from apps.bots.models import Bot
+
+class BotSerializer(serializers.ModelSerializer):
+    conversations_count = serializers.IntegerField(read_only=True)
+    documents_count = serializers.IntegerField(read_only=True)
+    owner_email = serializers.EmailField(source='owner.email', read_only=True)
+
+    class Meta:
+        model = Bot
+        fields = [
+            'id', 'name', 'description', 'status', 'model', 'provider',
+            'temperature', 'system_instruction', 'thinking_budget',
+            'telegram_token', 'avatar', 'created_at', 'updated_at',
+            'conversations_count', 'documents_count', 'owner_email'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'owner']
+
+    def validate_temperature(self, value):
+        if not 0 <= value <= 2:
+            raise serializers.ValidationError("Temperature must be between 0 and 2")
+        return value
+
+    def validate_thinking_budget(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError("Thinking budget must be non-negative")
+        return value
+
+class BotCreateSerializer(BotSerializer):
+    """Serializer for creating bots - owner is set automatically"""
+    pass
+
+class BotUpdateSerializer(BotSerializer):
+    """Serializer for updating bots - some fields may be readonly"""
+    pass
+```
+
+### 3. Views / ViewSets (views.py)
+
+**Правила:**
+- Используй `ViewSet` или `ModelViewSet` для CRUD операций
+- Кастомные actions через `@action(detail=True/False)`
+- Используй `get_queryset()` для фильтрации по user
+- Используй `get_serializer_class()` для разных serializers (create/update)
+- Обрабатывай ошибки через exceptions
+
+**Пример:**
+```python
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django.shortcuts import get_object_or_404
+
+from apps.bots.models import Bot
+from apps.bots.serializers import BotSerializer, BotCreateSerializer, BotUpdateSerializer
+from core.permissions import IsOwnerOrReadOnly
+
+class BotViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet для управления ботами.
+    
+    list: Список ботов текущего пользователя
+    create: Создание нового бота
+    retrieve: Получение деталей бота
+    update: Полное обновление бота
+    partial_update: Частичное обновление бота
+    destroy: Удаление бота
+    """
+    permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
+    
+    def get_queryset(self):
+        """Фильтруем боты по текущему пользователю"""
+        return Bot.objects.filter(owner=self.request.user)
+    
+    def get_serializer_class(self):
+        """Используем разные serializers для разных действий"""
+        if self.action == 'create':
+            return BotCreateSerializer
+        elif self.action in ['update', 'partial_update']:
+            return BotUpdateSerializer
+        return BotSerializer
+    
+    def perform_create(self, serializer):
+        """Автоматически устанавливаем owner при создании"""
+        serializer.save(owner=self.request.user)
+    
+    @action(detail=True, methods=['post'])
+    def activate(self, request, pk=None):
+        """Кастомное action для активации бота"""
+        bot = self.get_object()
+        if bot.status == 'draft':
+            bot.status = 'active'
+            bot.save()
+            return Response({'status': 'activated'})
+        return Response(
+            {'error': 'Bot is not in draft status'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+```
+
+### 4. Services (services.py)
+
+**Правила:**
+- Выноси бизнес-логику из views в services
+- Services — это обычные Python классы или функции
+- Один service класс на домен (BotService, GeminiService, TelegramService)
+- Обрабатывай исключения внутри services
+
+**Пример:**
+```python
+from typing import Optional
+from apps.bots.models import Bot
+from apps.accounts.models import User
+from services.gemini import GeminiService
+
+class BotService:
+    """Сервис для работы с ботами"""
+    
+    def __init__(self):
+        self.gemini_service = GeminiService()
+    
+    def create_bot(self, owner: User, data: dict) -> Bot:
+        """Создание нового бота"""
+        bot = Bot.objects.create(owner=owner, **data)
+        # Здесь можно добавить логику инициализации (создание Telegram бота и т.д.)
+        return bot
+    
+    def update_bot(self, bot: Bot, data: dict) -> Bot:
+        """Обновление бота"""
+        for key, value in data.items():
+            setattr(bot, key, value)
+        bot.save()
+        return bot
+    
+    def delete_bot(self, bot: Bot) -> None:
+        """Удаление бота с очисткой связанных данных"""
+        # Очистка Telegram бота, документов и т.д.
+        bot.delete()
+    
+    def test_bot_response(self, bot: Bot, prompt: str) -> str:
+        """Тестирование ответа бота"""
+        response = self.gemini_service.generate_response(
+            model=bot.model,
+            prompt=prompt,
+            system_instruction=bot.system_instruction,
+            temperature=bot.temperature,
+            thinking_budget=bot.thinking_budget
+        )
+        return response
+```
+
+### 5. Permissions (permissions.py)
+
+**Правила:**
+- Создавай кастомные permissions в `core/permissions.py`
+- Используй базовые DRF permissions где возможно
+- Проверяй ownership через `obj.owner == request.user`
+
+**Пример:**
+```python
+from rest_framework import permissions
+
+class IsOwnerOrReadOnly(permissions.BasePermission):
+    """
+    Разрешение только для владельца объекта на изменение,
+    остальные могут только читать.
+    """
+    
+    def has_object_permission(self, request, view, obj):
+        # Read permissions для всех аутентифицированных
+        if request.method in permissions.SAFE_METHODS:
+            return request.user.is_authenticated
+        
+        # Write permissions только для владельца
+        return obj.owner == request.user
+
+class IsBotOwner(permissions.BasePermission):
+    """Разрешение только для владельца бота"""
+    
+    def has_object_permission(self, request, view, obj):
+        return obj.owner == request.user
+```
+
+### 6. URLs (urls.py)
+
+**Правила:**
+- Используй `DefaultRouter` для ViewSets
+- Группируй URLs по приложениям
+- Используй префиксы для версионирования API (`/api/v1/`)
+
+**Пример:**
+```python
+# bot_factory/urls.py
+from django.contrib import admin
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from apps.bots.views import BotViewSet
+from apps.knowledge.views import DocumentViewSet, TextSnippetViewSet
+
+router = DefaultRouter()
+router.register(r'bots', BotViewSet, basename='bot')
+router.register(r'documents', DocumentViewSet, basename='document')
+router.register(r'snippets', TextSnippetViewSet, basename='snippet')
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('api/v1/', include(router.urls)),
+    path('api/v1/auth/', include('apps.accounts.urls')),
+    path('api/v1/telegram/', include('apps.telegram.urls')),
+]
+```
+
+---
+
+## 🔌 API Endpoints (на основе frontend требований)
+
+### Authentication
+- `POST /api/v1/auth/register/` — Регистрация
+- `POST /api/v1/auth/login/` — Вход (JWT tokens)
+- `POST /api/v1/auth/refresh/` — Обновление JWT token
+- `POST /api/v1/auth/logout/` — Выход
+- `GET /api/v1/auth/me/` — Текущий пользователь
+
+### Bots
+- `GET /api/v1/bots/` — Список ботов пользователя
+- `POST /api/v1/bots/` — Создание бота
+- `GET /api/v1/bots/{id}/` — Детали бота
+- `PUT /api/v1/bots/{id}/` — Полное обновление
+- `PATCH /api/v1/bots/{id}/` — Частичное обновление
+- `DELETE /api/v1/bots/{id}/` — Удаление бота
+
+### Stats (Analytics)
+- `GET /api/v1/stats/?period={period}` — Dashboard статистика
+- `GET /api/v1/stats/chart/?period={period}` — Данные для графиков
+- `GET /api/v1/stats/activity/` — Последняя активность
+
+### Users (Telegram)
+- `GET /api/v1/bots/{bot_id}/users/` — Список пользователей Telegram бота
+- `POST /api/v1/users/{user_id}/status/` — Обновление статуса пользователя
+
+### Knowledge Base
+- `GET /api/v1/bots/{bot_id}/documents/` — Список документов
+- `POST /api/v1/bots/{bot_id}/documents/` — Загрузка документа (multipart/form-data)
+- `DELETE /api/v1/documents/{id}/` — Удаление документа
+- `GET /api/v1/bots/{bot_id}/snippets/` — Список текстовых snippets
+- `POST /api/v1/snippets/` — Создание snippet
+- `DELETE /api/v1/snippets/{id}/` — Удаление snippet
+
+### Chat
+- `GET /api/v1/bots/{bot_id}/sessions/` — Список чат-сессий
+- `GET /api/v1/sessions/{session_id}/messages/` — Сообщения сессии
+
+### Subscription
+- `GET /api/v1/subscription/` — Информация о подписке и usage
+
+### Telegram Webhooks
+- `POST /api/v1/telegram/webhook/{bot_token}/` — Webhook для Telegram
+
+---
+
+## 📊 Models (на основе frontend types.ts)
+
+### Bot Model
+```python
+# apps/bots/models.py
+- id: UUID
+- owner: FK(User)
+- name: CharField(100)
+- description: TextField
+- status: CharField (draft/active/paused/error)
+- model: CharField (gemini-2.5-flash, gpt-4, etc.)
+- provider: CharField (gemini/openai/anthropic)
+- temperature: FloatField (0-2)
+- system_instruction: TextField
+- thinking_budget: IntegerField (optional, for Gemini)
+- telegram_token: CharField (optional)
+- avatar: CharField (emoji or URL)
+- created_at: DateTimeField
+- updated_at: DateTimeField
+```
+
+### TelegramUser Model
+```python
+# apps/telegram/models.py
+- id: UUID
+- telegram_id: BigIntegerField (unique)
+- bot: FK(Bot)
+- username: CharField (optional)
+- first_name: CharField
+- last_name: CharField (optional)
+- avatar_url: URLField (optional)
+- status: CharField (active/blocked)
+- first_seen: DateTimeField
+- last_active: DateTimeField
+- notes: TextField (optional)
+```
+
+### Document Model
+```python
+# apps/knowledge/models.py
+- id: UUID
+- bot: FK(Bot)
+- name: CharField
+- file: FileField
+- type: CharField (pdf/txt/docx/md)
+- size: BigIntegerField
+- status: CharField (indexing/ready/error)
+- upload_date: DateTimeField
+```
+
+### TextSnippet Model
+```python
+# apps/knowledge/models.py
+- id: UUID
+- bot: FK(Bot)
+- title: CharField
+- content: TextField
+- tags: ArrayField (PostgreSQL)
+- updated_at: DateTimeField
+```
+
+### ChatSession Model
+```python
+# apps/chat/models.py
+- id: UUID
+- bot: FK(Bot)
+- user: FK(TelegramUser)
+- created_at: DateTimeField
+- updated_at: DateTimeField
+- is_flagged: BooleanField
+- sentiment: CharField (positive/neutral/negative)
+```
+
+### ChatMessage Model
+```python
+# apps/chat/models.py
+- id: UUID
+- session: FK(ChatSession)
+- role: CharField (user/model)
+- content: TextField
+- timestamp: DateTimeField
+- is_thinking: BooleanField (optional)
+- is_flagged: BooleanField
+- attachments: JSONField (optional)
+```
+
+---
+
+## 🔒 Безопасность
+
+### Authentication
+- Используй JWT tokens (djangorestframework-simplejwt)
+- Access token: короткий срок жизни (15-30 минут)
+- Refresh token: длинный срок жизни (7-30 дней)
+- Храни refresh tokens в HttpOnly cookies (опционально)
+
+### Permissions
+- Все endpoints требуют аутентификации (`IsAuthenticated`)
+- Проверяй ownership через кастомные permissions
+- Не показывай данные других пользователей
+
+### Data Validation
+- Валидация в serializers
+- Используй `validate()` методы
+- Проверяй типы данных
+- Санитизация пользовательского ввода
+
+### API Security
+- CORS настройки для frontend
+- Rate limiting для API endpoints
+- Хеширование sensitive данных (telegram tokens)
+- Используй HTTPS в production
+
+---
+
+## 🧪 Тестирование
+
+### Структура тестов
+```python
+# apps/bots/tests/
+├── __init__.py
+├── test_models.py
+├── test_serializers.py
+├── test_views.py
+└── test_services.py
+```
+
+### Пример теста
+```python
+import pytest
+from django.contrib.auth import get_user_model
+from apps.bots.models import Bot
+from apps.bots.serializers import BotSerializer
+
+User = get_user_model()
+
+@pytest.mark.django_db
+class TestBotSerializer:
+    def test_create_bot(self):
+        user = User.objects.create_user(email='test@example.com', password='testpass123')
+        data = {
+            'name': 'Test Bot',
+            'model': 'gemini-2.5-flash',
+            'provider': 'gemini',
+        }
+        serializer = BotSerializer(data=data)
+        assert serializer.is_valid()
+        bot = serializer.save(owner=user)
+        assert bot.name == 'Test Bot'
+        assert bot.owner == user
+```
+
+---
+
+## 🚀 Deployment & Environment
+
+### Settings Structure
+```python
+# bot_factory/settings/base.py — базовые настройки
+# bot_factory/settings/development.py — для разработки
+# bot_factory/settings/production.py — для production
+
+# Используй django-environ для управления переменными окружения
+```
+
+### Environment Variables (.env.example)
+```bash
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/bot_factory_db
+
+# Django
+SECRET_KEY=your-secret-key-here
+DEBUG=True
+ALLOWED_HOSTS=localhost,127.0.0.1
+
+# API Keys
+GEMINI_API_KEY=your-gemini-api-key
+TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+
+# JWT
+JWT_SECRET_KEY=your-jwt-secret-key
+
+# CORS
+CORS_ALLOWED_ORIGINS=http://localhost:3000
+
+# Redis (для Celery и кэширования)
+REDIS_URL=redis://localhost:6379/0
+```
+
+---
+
+## 📝 Naming Conventions
+
+### Python
+- **Классы:** PascalCase (`BotViewSet`, `BotService`)
+- **Функции/методы:** snake_case (`create_bot`, `get_queryset`)
+- **Константы:** UPPER_SNAKE_CASE (`MAX_BOT_NAME_LENGTH`)
+- **Приватные методы:** с префиксом `_` (`_internal_method`)
+
+### Django
+- **Models:** PascalCase (`Bot`, `TelegramUser`)
+- **ViewSets:** PascalCase + ViewSet (`BotViewSet`)
+- **Serializers:** PascalCase + Serializer (`BotSerializer`)
+- **URLs:** kebab-case в URL (`/api/v1/bots/`), snake_case в view names
+
+### Files
+- `models.py`, `views.py`, `serializers.py`, `urls.py` — стандартные Django имена
+- `services.py` — для бизнес-логики
+- `permissions.py` — для кастомных permissions
+- `utils.py` — для утилит
+
+---
+
+## 🔄 API Response Format
+
+### Success Response
+```json
+{
+  "id": "uuid-string",
+  "name": "Bot Name",
+  "status": "active",
+  ...
+}
+```
+
+### Error Response
+```json
+{
+  "error": {
+    "message": "Error message",
+    "code": "ERROR_CODE",
+    "status": 400,
+    "details": {
+      "field_name": ["Error message for field"]
+    }
+  }
+}
+```
+
+### Pagination
+```json
+{
+  "count": 100,
+  "next": "http://api.example.com/bots/?page=2",
+  "previous": null,
+  "results": [...]
+}
+```
+
+---
+
+## 🎯 Best Practices
+
+### 1. Code Quality
+- Используй `black` для форматирования
+- Используй `flake8` или `ruff` для линтинга
+- Пиши docstrings для всех классов и функций
+- Используй type hints где возможно
+
+### 2. Performance
+- Используй `select_related()` и `prefetch_related()` для оптимизации запросов
+- Используй индексы для часто используемых полей
+- Используй пагинацию для списков
+- Кэшируй часто используемые данные
+
+### 3. Error Handling
+- Используй кастомные exceptions (`core/exceptions.py`)
+- Обрабатывай ошибки в views и возвращай понятные сообщения
+- Логируй ошибки для debugging
+
+### 4. Documentation
+- Используй DRF Schema для автоматической документации
+- Пиши README для каждого приложения
+- Документируй сложную бизнес-логику
+
+---
+
+## 🔗 Integration Points
+
+### Frontend Integration
+- **Base URL:** `http://localhost:8000/api/v1/`
+- **CORS:** Разрешен `http://localhost:3000` (frontend dev server)
+- **Authentication:** JWT tokens в Authorization header
+
+### Telegram Integration
+- **Webhook URL:** `/api/v1/telegram/webhook/{bot_token}/`
+- **Handler:** Async обработка сообщений через Celery (планируется)
+
+### Google Gemini Integration
+- **Service:** `services/gemini.py`
+- **Rate Limiting:** Учитывать лимиты API
+- **Error Handling:** Обрабатывать ошибки API gracefully
+
+---
+
+## 📚 Дополнительные Правила
+
+### 1. Миграции
+- Всегда создавай миграции для изменений моделей
+- Проверяй миграции перед коммитом
+- Используй `--name` для понятных имен миграций
+
+### 2. Коммиты
+- Используй conventional commits (feat:, fix:, refactor:, etc.)
+- Пиши понятные commit messages
+
+### 3. Code Reviews
+- Проверяй security issues
+- Проверяй performance implications
+- Проверяй соответствие API контракту с frontend
+
+---
+
+**Версия:** 1.0
+**Последнее обновление:** 2025-01-22
