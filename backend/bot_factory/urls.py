@@ -19,6 +19,10 @@ urlpatterns = [
     # Admin site (django-unfold)
     path('admin/', admin.site.urls),
     
+    # Webhook endpoint for Telegram updates (must be before API routes)
+    # POST /webhook/<token>/
+    path('webhook/<str:token>/', include('apps.telegram.webhook_urls')),
+    
     # API v1 endpoints
     path('api/v1/auth/', include('apps.accounts.urls')),
     path('api/v1/subscription/', subscription_usage_view, name='subscription'),  # Subscription endpoint

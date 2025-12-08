@@ -146,13 +146,26 @@ async def handle_message(message: Message, state: FSMContext):
                 history=history
             )
             
+            # Prepare attachments - ensure grounding_chunks is JSON serializable
+            grounding_chunks = response.get('groundingChunks', [])
+            # Convert to list of dicts if needed (safety check)
+            if grounding_chunks:
+                try:
+                    # Try to serialize to ensure it's JSON-compatible
+                    import json
+                    json.dumps(grounding_chunks)
+                except (TypeError, ValueError):
+                    # If not serializable, convert to empty list
+                    logger.warning("[CHAT_ROUTER] groundingChunks is not JSON serializable, skipping")
+                    grounding_chunks = []
+            
             # Save bot response
             await save_chat_message(
                 session=chat_session,
                 role='model',
                 content=response.get('text', ''),
                 attachments={
-                    'grounding_chunks': response.get('groundingChunks', [])
+                    'grounding_chunks': grounding_chunks
                 }
             )
             

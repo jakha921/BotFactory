@@ -43,3 +43,7 @@ requests>=2.31.0  # For Telegram Bot API requests
 
 # Encryption
 cryptography>=41.0.0  # For encrypting Telegram bot tokens
+
+# Redis for FSM storage (for aiogram webhook gateway)
+redis>=5.0.0  # Redis client for Python
+aiogram[redis]>=3.0.0  # Aiogram with Redis support (if not already included)

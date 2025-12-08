@@ -114,13 +114,29 @@ class GeminiService:
             text = text.strip()
             
             # Extract grounding chunks if available
+            # Convert protobuf objects to serializable dicts
             grounding_chunks = []
             if hasattr(response, 'candidates') and response.candidates:
                 candidate = response.candidates[0]
                 if hasattr(candidate, 'grounding_metadata'):
                     grounding_metadata = candidate.grounding_metadata
                     if hasattr(grounding_metadata, 'grounding_chunks'):
-                        grounding_chunks = grounding_metadata.grounding_chunks
+                        # Convert protobuf RepeatedComposite to list of dicts
+                        for chunk in grounding_metadata.grounding_chunks:
+                            chunk_dict = {}
+                            # Extract common fields from grounding chunk
+                            if hasattr(chunk, 'web'):
+                                chunk_dict['web'] = {
+                                    'uri': str(chunk.web.uri) if hasattr(chunk.web, 'uri') else None,
+                                    'title': str(chunk.web.title) if hasattr(chunk.web, 'title') else None,
+                                }
+                            if hasattr(chunk, 'retrieved_context'):
+                                chunk_dict['retrieved_context'] = {
+                                    'uri': str(chunk.retrieved_context.uri) if hasattr(chunk.retrieved_context, 'uri') else None,
+                                    'title': str(chunk.retrieved_context.title) if hasattr(chunk.retrieved_context, 'title') else None,
+                                }
+                            if chunk_dict:  # Only add if we extracted something
+                                grounding_chunks.append(chunk_dict)
             
             return {
                 'text': text,

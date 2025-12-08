@@ -91,7 +91,7 @@ async def start_form(
     await message.answer(prompt)
 
 
-@forms_router.message(F.text & FormModeFilter())
+@forms_router.message(F.text, FormModeFilter())
 async def handle_form_input(message: Message, state: FSMContext):
     """
     Handle form input for dynamic forms.

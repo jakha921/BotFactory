@@ -4,7 +4,7 @@ URLs for telegram app.
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from apps.telegram.views import TelegramUserViewSet
+from apps.telegram.views import TelegramUserViewSet, webhook_view
 
 app_name = 'telegram'
 

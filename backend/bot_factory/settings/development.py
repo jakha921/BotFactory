@@ -7,7 +7,13 @@ from pathlib import Path
 DEBUG = True
 
 # Development-specific settings
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
+# Allow localhost, 0.0.0.0, and any hosts from ALLOWED_HOSTS env variable
+default_hosts = ['localhost', '127.0.0.1', '0.0.0.0']
+env_hosts = env.list('ALLOWED_HOSTS', default=[])
+ALLOWED_HOSTS = list(set(default_hosts + env_hosts))
+
+# For development, dynamically allow ngrok domains via middleware
+# The DisallowedHostBypassMiddleware will add ngrok hosts to ALLOWED_HOSTS on-the-fly
 
 # Use SQLite for development if PostgreSQL is not configured
 # Override database settings for easier development

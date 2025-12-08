@@ -37,3 +37,6 @@ cryptography>=41.0.0
 # Image processing (for Django file handling)
 Pillow>=10.0.0
 
+# Redis for FSM storage (for webhook gateway)
+redis>=5.0.0
+

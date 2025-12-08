@@ -3,7 +3,7 @@ Dynamic form states generated from bot configuration.
 """
 from typing import Dict, Any, Optional
 from aiogram.fsm.state import State, StatesGroup
-from utils.form_builder import parse_form_config, create_form_states
+from bot.utils.form_builder import parse_form_config, create_form_states
 
 
 # Cache for form state classes

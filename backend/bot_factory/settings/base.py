@@ -57,6 +57,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'core.middleware.DisallowedHostBypassMiddleware',  # Allow ngrok domains in development (MUST be before SecurityMiddleware)
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',  # CORS middleware (early)
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -139,6 +140,12 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Custom User Model
 AUTH_USER_MODEL = 'accounts.User'
+
+# Redis Configuration for FSM Storage (aiogram webhook gateway)
+# Format: redis://[:password@]host[:port][/db]
+# Example: redis://localhost:6379/0
+# Example with password: redis://:password@localhost:6379/0
+REDIS_URL = env('REDIS_URL', default='redis://localhost:6379/0')
 
 # Django REST Framework
 REST_FRAMEWORK = {
