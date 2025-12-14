@@ -17,6 +17,9 @@ if backend_path not in sys.path:
 
 from services.gemini import GeminiService
 from bot.integrations.django_orm import get_bot_knowledge_base
+from apps.knowledge.models import DocumentChunk
+from pgvector.django import L2Distance
+from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
 
 
 _gemini_service: Optional[GeminiService] = None
@@ -47,33 +50,27 @@ async def generate_bot_response(
         Dict with 'text' and optional 'groundingChunks'
     """
     try:
-        # Get knowledge base for bot
-        knowledge_base = await get_bot_knowledge_base(str(bot.id))
+        @sync_to_async
+        def _get_rag_context(prompt):
+            # 1. Embed the user's prompt
+            embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+            prompt_embedding = embeddings.embed_query(prompt)
+
+            # 2. Query the vector database for relevant chunks
+            chunks = DocumentChunk.objects.filter(document__bot=bot).order_by(
+                L2Distance('embedding', prompt_embedding)
+            )[:5]
+
+            # 3. Augment the system instruction with the retrieved chunks
+            context = "\n\n".join([chunk.text for chunk in chunks])
+            return context
+
+        rag_context = await _get_rag_context(prompt)
         
-        # Build system instruction with knowledge base
         system_instruction = bot.system_instruction or "You are a helpful AI assistant."
         
-        # Add knowledge base context
-        if knowledge_base.get('snippets') or knowledge_base.get('documents'):
-            knowledge_context = []
-            
-            # Add snippets
-            if knowledge_base.get('snippets'):
-                knowledge_context.append("\n\n## Knowledge Base:")
-                for snippet in knowledge_base['snippets']:
-                    knowledge_context.append(f"\n### {snippet.get('title', 'Untitled')}")
-                    knowledge_context.append(snippet.get('content', ''))
-                    if snippet.get('tags'):
-                        knowledge_context.append(f"\nTags: {', '.join(snippet['tags'])}")
-            
-            # Add document summaries
-            if knowledge_base.get('documents'):
-                knowledge_context.append("\n\n## Available Documents:")
-                for doc in knowledge_base['documents']:
-                    knowledge_context.append(f"- {doc.get('name', 'Unknown')} ({doc.get('type', 'unknown')})")
-            
-            if knowledge_context:
-                system_instruction = f"{system_instruction}\n{''.join(knowledge_context)}"
+        if rag_context:
+            system_instruction = f"{system_instruction}\n\n## Context from documents:\n{rag_context}"
         
         # Use sync_to_async for Django service
         @sync_to_async

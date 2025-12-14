@@ -1,7 +1,8 @@
 """
 Views for knowledge app.
-DocumentViewSet and TextSnippetViewSet for knowledge base management.
+DocumentViewSet and DocumentChunkViewSet for knowledge base management.
 """
+import threading
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -9,15 +10,15 @@ from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 
-from apps.knowledge.models import Document, TextSnippet
+from apps.knowledge.models import Document, DocumentChunk
 from apps.bots.models import Bot
 from apps.knowledge.serializers import (
     DocumentSerializer,
     DocumentUploadSerializer,
-    TextSnippetSerializer,
-    TextSnippetCreateSerializer,
+    DocumentChunkSerializer,
 )
 from core.permissions import IsOwnerOrReadOnly
+from .services import process_document
 
 
 class DocumentViewSet(viewsets.ModelViewSet):
@@ -52,6 +53,10 @@ class DocumentViewSet(viewsets.ModelViewSet):
         serializer = DocumentUploadSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         document = serializer.save(bot=bot)
+
+        # Process the document in a separate thread
+        thread = threading.Thread(target=process_document, args=(document,))
+        thread.start()
         
         return Response(
             DocumentSerializer(document).data,
@@ -65,39 +70,25 @@ class DocumentViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-class TextSnippetViewSet(viewsets.ModelViewSet):
+class DocumentChunkViewSet(viewsets.ModelViewSet):
     """
-    ViewSet for managing text snippets.
+    ViewSet for managing document chunks.
     
-    list: GET /api/v1/bots/{bot_id}/snippets/ - List snippets for a bot
-    create: POST /api/v1/snippets/ - Create a snippet
-    destroy: DELETE /api/v1/snippets/{id}/ - Delete a snippet
+    list: GET /api/v1/documents/{document_id}/chunks/ - List chunks for a document
     """
     permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
-    serializer_class = TextSnippetSerializer
+    serializer_class = DocumentChunkSerializer
     
     def get_queryset(self):
-        """Filter snippets by bot and ensure user owns the bot."""
-        bot_id = self.request.query_params.get('bot_id') or self.kwargs.get('bot_id')
-        if bot_id:
-            bot = get_object_or_404(Bot, id=bot_id, owner=self.request.user)
-            return TextSnippet.objects.filter(bot=bot)
-        return TextSnippet.objects.none()
+        """Filter chunks by document and ensure user owns the bot."""
+        document_id = self.kwargs.get('document_id')
+        if document_id:
+            document = get_object_or_404(Document, id=document_id, bot__owner=self.request.user)
+            return DocumentChunk.objects.filter(document=document)
+        return DocumentChunk.objects.none()
     
-    def get_serializer_class(self):
-        """Use different serializer for create."""
-        if self.action == 'create':
-            return TextSnippetCreateSerializer
-        return TextSnippetSerializer
-    
-    def perform_create(self, serializer):
-        """Ensure bot belongs to user."""
-        bot_id = serializer.validated_data.get('bot').id
-        bot = get_object_or_404(Bot, id=bot_id, owner=self.request.user)
-        serializer.save(bot=bot)
-    
-    def list(self, request, bot_id=None):
-        """List snippets for a bot."""
+    def list(self, request, document_id=None):
+        """List chunks for a document."""
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)

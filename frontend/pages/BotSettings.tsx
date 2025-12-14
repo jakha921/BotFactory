@@ -25,6 +25,7 @@ import { validateBot, getFieldErrors } from '../schemas/botSchema';
 import { KeyboardEditor } from '../components/ui/KeyboardEditor';
 import { FormEditor } from '../components/ui/FormEditor';
 import { useAppStore } from '../store/useAppStore';
+import { KnowledgeSettings } from './KnowledgeSettings';
 
 interface BotSettingsProps {
   botId: string | null;
@@ -34,6 +35,7 @@ interface BotSettingsProps {
 const TABS = [
   { id: 'general', label: 'General' },
   { id: 'model', label: 'Model & AI' },
+  { id: 'knowledge', label: 'Knowledge Base' },
   { id: 'integrations', label: 'Integrations' },
   { id: 'ui', label: 'UI & Buttons' },
 ];
@@ -463,6 +465,11 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
               </div>
             </CardContent>
           </Card>
+        )}
+
+        {/* KNOWLEDGE TAB */}
+        {activeTab === 'knowledge' && botId && botId !== 'new' && (
+          <KnowledgeSettings botId={botId} />
         )}
 
         {/* MODEL TAB */}
