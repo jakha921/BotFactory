@@ -141,3 +141,86 @@ class BotService:
                             return False, f"Form '{form_name}' step must have '{field}' field"
         
         return True, None
+    
+    @staticmethod
+    def register_webhook(bot: Bot, webhook_url: str = None) -> dict:
+        """
+        Register webhook for a bot with Telegram.
+        
+        Args:
+            bot: Bot instance
+            webhook_url: Full webhook URL (if None, will use default)
+            
+        Returns:
+            dict: Telegram API response
+        """
+        import requests
+        import logging
+        import secrets
+        from django.conf import settings
+        
+        logger = logging.getLogger(__name__)
+        
+        if not webhook_url:
+            # Use bot ID instead of token for security
+            base_url = settings.WEBHOOK_BASE_URL
+            webhook_url = f"{base_url}/api/telegram/webhook/{bot.id}/"
+        
+        # Generate webhook secret for signature validation
+        if not bot.webhook_secret:
+            bot.webhook_secret = secrets.token_urlsafe(32)
+            bot.save(update_fields=['webhook_secret'])
+        
+        telegram_api_url = f"https://api.telegram.org/bot{bot.decrypted_telegram_token}/setWebhook"
+        
+        try:
+            response = requests.post(telegram_api_url, json={
+                'url': webhook_url,
+                'secret_token': bot.webhook_secret,  # Add secret token for validation
+                'allowed_updates': ['message', 'callback_query']
+            }, timeout=10)
+            
+            result = response.json()
+            
+            if result.get('ok'):
+                logger.info(f"Webhook registered for bot {bot.name}: {webhook_url}")
+            else:
+                logger.error(f"Failed to register webhook for bot {bot.name}: {result}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error registering webhook for bot {bot.name}: {str(e)}")
+            return {'ok': False, 'error': str(e)}
+    
+    @staticmethod
+    def delete_webhook(bot: Bot) -> dict:
+        """
+        Delete webhook for a bot (switch to polling mode).
+        
+        Args:
+            bot: Bot instance
+            
+        Returns:
+            dict: Telegram API response
+        """
+        import requests
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        telegram_api_url = f"https://api.telegram.org/bot{bot.decrypted_telegram_token}/deleteWebhook"
+        
+        try:
+            response = requests.post(telegram_api_url, timeout=10)
+            result = response.json()
+            
+            if result.get('ok'):
+                logger.info(f"Webhook deleted for bot {bot.name}")
+            else:
+                logger.error(f"Failed to delete webhook for bot {bot.name}: {result}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error deleting webhook for bot {bot.name}: {str(e)}")
+            return {'ok': False, 'error': str(e)}

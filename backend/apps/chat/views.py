@@ -17,6 +17,9 @@ from core.permissions import IsOwnerOrReadOnly
 from services.transcription import transcribe_audio
 from services.file_processing import extract_text_from_file
 from services.gemini import get_gemini_service
+from apps.knowledge.models import DocumentChunk, TextSnippet
+from pgvector.django import L2Distance
+from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
 
 
 class ChatSessionViewSet(viewsets.ReadOnlyModelViewSet):
@@ -139,6 +142,49 @@ class ChatGenerationView(views.APIView):
         final_system_instruction = system_instruction or bot.system_instruction or 'You are a helpful AI assistant.'
         final_temperature = temperature if temperature is not None else (bot.temperature or 0.7)
         final_thinking_budget = thinking_budget if thinking_budget is not None else bot.thinking_budget
+        
+        # RAG: Get relevant context from knowledge base
+        rag_context = None
+        try:
+            # Embed the prompt
+            embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+            prompt_embedding = embeddings.embed_query(prompt)
+            
+            # Get relevant document chunks
+            doc_chunks = DocumentChunk.objects.filter(
+                document__bot=bot
+            ).order_by(
+                L2Distance('embedding', prompt_embedding)
+            )[:3]  # Top 3 most relevant chunks
+            
+            # Get relevant text snippets
+            snippet_chunks = TextSnippet.objects.filter(
+                bot=bot,
+                embedding__isnull=False
+            ).order_by(
+                L2Distance('embedding', prompt_embedding)
+            )[:3]  # Top 3 most relevant snippets
+            
+            # Combine context
+            context_parts = []
+            if doc_chunks.exists():
+                context_parts.append("## Relevant Document Content:")
+                for chunk in doc_chunks:
+                    context_parts.append(f"- {chunk.text[:500]}...")  # Limit chunk size
+            
+            if snippet_chunks.exists():
+                context_parts.append("\n## Relevant Knowledge Base Snippets:")
+                for snippet in snippet_chunks:
+                    context_parts.append(f"- {snippet.title}: {snippet.content[:500]}...")
+            
+            if context_parts:
+                rag_context = "\n".join(context_parts)
+                final_system_instruction = f"{final_system_instruction}\n\n{rag_context}"
+        except Exception as e:
+            # Log error but continue without RAG context
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to retrieve RAG context: {str(e)}")
         
         # Generate response using Gemini service
         try:

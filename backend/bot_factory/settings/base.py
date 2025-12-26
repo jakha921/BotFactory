@@ -8,14 +8,15 @@ import environ
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = BASE_DIR.parent  # Root directory of the entire project
 
 # Initialize environment variables
 env = environ.Env(
     DEBUG=(bool, False)
 )
 
-# Read .env file if it exists
-environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
+# Read .env file from project root (not backend/.env)
+environ.Env.read_env(os.path.join(PROJECT_ROOT, '.env'))
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env('SECRET_KEY', default='django-insecure-dn#pks(p1h95+&-m9u#9&h_q-klo7ep*m+*04ep-r7hq+(0(tq')
@@ -44,6 +45,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',  # JWT token blacklist
+    'drf_spectacular',  # OpenAPI 3.0 schema generation
     'corsheaders',
     'django_filters',
     
@@ -66,6 +68,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'core.middleware.APIRequestLoggingMiddleware',  # API request logging
 ]
 
 ROOT_URLCONF = 'bot_factory.urls'
@@ -147,6 +150,23 @@ AUTH_USER_MODEL = 'accounts.User'
 # Example with password: redis://:password@localhost:6379/0
 REDIS_URL = env('REDIS_URL', default='redis://localhost:6379/0')
 
+# Cache Configuration (used for rate limiting)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
+    }
+}
+
+# Use Redis cache in production if available
+if REDIS_URL and not DEBUG:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+        }
+    }
+
 # Django REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -166,6 +186,7 @@ REST_FRAMEWORK = {
         'rest_framework.renderers.JSONRenderer',
     ],
     'EXCEPTION_HANDLER': 'core.exceptions.custom_exception_handler',
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
 # JWT Settings
@@ -184,12 +205,16 @@ SIMPLE_JWT = {
 }
 
 # CORS Settings
-CORS_ALLOWED_ORIGINS = [
+# Allow additional origins from environment variable (comma-separated)
+CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[
     'http://localhost:3000',  # Frontend dev server
     'http://127.0.0.1:3000',
-]
+])
 
 CORS_ALLOW_CREDENTIALS = True
+
+# Import logging configuration
+from bot_factory.settings.logging_config import LOGGING
 
 # Django Unfold Settings
 UNFOLD = {
@@ -217,4 +242,50 @@ def environment_callback(request):
 
 # Google Gemini API
 GEMINI_API_KEY = env('GEMINI_API_KEY', default='')
+
+# Webhook Configuration
+WEBHOOK_BASE_URL = env('WEBHOOK_BASE_URL', default='http://localhost:8000')
+
+# Rate Limiting
+RATELIMIT_ENABLE = env.bool('RATELIMIT_ENABLE', default=True)
+RATELIMIT_USE_CACHE = 'default'
+
+
+# drf-spectacular settings
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Bot Factory API',
+    'DESCRIPTION': 'REST API for Bot Factory - SaaS platform for creating and managing AI bots with Telegram integration and Google Gemini.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SCHEMA_PATH_PREFIX': '/api/v1',
+    'COMPONENT_SPLIT_REQUEST': True,
+    'AUTHENTICATION_WHITELIST': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ],
+    'SERVERS': [
+        {'url': 'http://localhost:8000', 'description': 'Development server'},
+    ],
+    'TAGS': [
+        {'name': 'Authentication', 'description': 'User authentication and authorization'},
+        {'name': 'Bots', 'description': 'Bot management (CRUD operations)'},
+        {'name': 'Knowledge Base', 'description': 'Documents and text snippets for bot knowledge'},
+        {'name': 'Chat', 'description': 'Chat sessions and message generation'},
+        {'name': 'Telegram', 'description': 'Telegram integration and webhooks'},
+        {'name': 'Analytics', 'description': 'Statistics and analytics'},
+        {'name': 'Subscription', 'description': 'Subscription and usage information'},
+    ],
+}
+
+
+# Celery Configuration
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes
+
 

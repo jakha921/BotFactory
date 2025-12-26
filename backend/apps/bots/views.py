@@ -16,7 +16,10 @@ from apps.bots.serializers import (
     BotCreateSerializer,
     BotUpdateSerializer,
     UIConfigSerializer,
+    BotAPIKeySerializer,
+    BotAPIKeyCreateSerializer,
 )
+from apps.bots.models import BotAPIKey
 from core.permissions import IsOwnerOrReadOnly
 from core.mixins import OwnerFilterMixin, OwnerCreateMixin
 
@@ -223,7 +226,8 @@ class BotViewSet(OwnerFilterMixin, OwnerCreateMixin, viewsets.ModelViewSet):
                 if data.get('ok'):
                     bot_info = data.get('result', {})
                     
-                    # Send notification to admin if they have telegram_id
+                    # Try to send notification to user if they have telegram_id
+                    # Note: This will only work if user has started a conversation with the bot
                     notification_sent = False
                     notification_error = None
                     
@@ -237,10 +241,12 @@ class BotViewSet(OwnerFilterMixin, OwnerCreateMixin, viewsets.ModelViewSet):
                         f'User {request.user.id} (email: {request.user.email}) has telegram_id: {request.user.telegram_id}'
                     )
                     
+                    # Only attempt notification if user has telegram_id
+                    # This is optional - test success doesn't depend on notification
                     if has_telegram_id:
                         try:
                             notification_message = (
-                                f"Bot Connection Test Successful!\n\n"
+                                f"✅ Bot Connection Test Successful!\n\n"
                                 f"Bot: @{bot_info.get('username', 'N/A')} ({bot_info.get('first_name', 'N/A')})\n"
                                 f"Bot ID: {bot_info.get('id')}\n"
                                 f"Bot Name: {bot.name}\n"
@@ -261,32 +267,33 @@ class BotViewSet(OwnerFilterMixin, OwnerCreateMixin, viewsets.ModelViewSet):
                             
                             if send_response.status_code == 200 and send_data.get('ok'):
                                 notification_sent = True
+                                logger.info(f'Successfully sent notification to user {request.user.id}')
                             else:
                                 # Get error description from Telegram API response
-                                notification_error = send_data.get('description', f'Telegram API returned status {send_response.status_code}')
-                                # Common errors:
-                                if 'chat not found' in notification_error.lower():
-                                    notification_error = 'User must start a conversation with the bot first. Send /start to the bot in Telegram.'
-                                elif 'bot blocked' in notification_error.lower() or 'blocked' in notification_error.lower():
-                                    notification_error = 'Bot is blocked by user. Unblock the bot in Telegram.'
+                                error_desc = send_data.get('description', f'Telegram API returned status {send_response.status_code}')
                                 
-                                logger.warning(
-                                    f'Failed to send Telegram notification to user {request.user.id} (telegram_id: {request.user.telegram_id}). '
-                                    f'Error: {notification_error}. Response: {send_data}'
+                                # Common errors - provide helpful messages
+                                if 'chat not found' in error_desc.lower() or 'bot blocked' in error_desc.lower():
+                                    notification_error = (
+                                        'To receive notifications, you need to start a conversation with this bot first. '
+                                        f'Send /start to @{bot_info.get("username", "the bot")} in Telegram.'
+                                    )
+                                else:
+                                    notification_error = f'Could not send notification: {error_desc}'
+                                
+                                # Log warning but don't fail the test
+                                logger.info(
+                                    f'Could not send Telegram notification to user {request.user.id} (telegram_id: {request.user.telegram_id}). '
+                                    f'Reason: {error_desc}. This is normal if user hasn\'t started a conversation with the bot.'
                                 )
-                        except requests.exceptions.ConnectionError as e:
-                            # Connection refused or network unreachable
-                            notification_error = f'Cannot connect to Telegram API. Please check your internet connection or firewall settings. Error: {str(e)}'
-                            logger.error(f'Connection error sending Telegram notification: {str(e)}', exc_info=True)
-                        except requests.exceptions.Timeout as e:
-                            notification_error = f'Telegram API request timed out. Please try again later.'
-                            logger.error(f'Timeout error sending Telegram notification: {str(e)}', exc_info=True)
-                        except requests.exceptions.RequestException as e:
-                            notification_error = f'Network error: {str(e)}'
-                            logger.error(f'Network error sending Telegram notification: {str(e)}', exc_info=True)
+                        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.RequestException) as e:
+                            # Network errors - log but don't fail test
+                            notification_error = 'Network error while sending notification'
+                            logger.info(f'Network error sending Telegram notification (non-critical): {str(e)}')
                         except Exception as e:
+                            # Other errors - log but don't fail test
                             notification_error = f'Unexpected error: {str(e)}'
-                            logger.error(f'Error sending Telegram notification: {str(e)}', exc_info=True)
+                            logger.warning(f'Error sending Telegram notification (non-critical): {str(e)}', exc_info=True)
                     
                     return Response({
                         'success': True,
@@ -414,3 +421,62 @@ class BotViewSet(OwnerFilterMixin, OwnerCreateMixin, viewsets.ModelViewSet):
             'success': True,
             'message': 'Bot restart signal sent. Bot will be restarted by monitor within 30 seconds.'
         }, status=status.HTTP_200_OK)
+    
+    @action(detail=True, methods=['get', 'post'], url_path='api-keys')
+    def api_keys(self, request, pk=None):
+        """
+        Get or create API keys for a bot.
+        
+        GET /api/v1/bots/{id}/api-keys/ - List API keys
+        POST /api/v1/bots/{id}/api-keys/ - Create new API key
+        """
+        bot = self.get_object()
+        
+        if request.method == 'GET':
+            # List API keys
+            api_keys = BotAPIKey.objects.filter(bot=bot).order_by('-created_at')
+            serializer = BotAPIKeySerializer(api_keys, many=True)
+            return Response(serializer.data)
+        
+        elif request.method == 'POST':
+            # Create new API key
+            serializer = BotAPIKeyCreateSerializer(
+                data=request.data,
+                context={'bot': bot}
+            )
+            serializer.is_valid(raise_exception=True)
+            api_key_obj = serializer.save()
+            
+            # Get plain key from context
+            plain_key = serializer.context.get('plain_key')
+            
+            return Response({
+                'id': str(api_key_obj.id),
+                'name': api_key_obj.name,
+                'key': plain_key,  # Only returned once on creation
+                'key_prefix': api_key_obj.key_prefix,
+                'created_at': api_key_obj.created_at.isoformat(),
+                'expires_at': api_key_obj.expires_at.isoformat() if api_key_obj.expires_at else None,
+                'warning': 'Save this key securely. It will not be shown again.'
+            }, status=status.HTTP_201_CREATED)
+    
+    @action(detail=True, methods=['delete'], url_path='api-keys/(?P<api_key_id>[^/.]+)')
+    def delete_api_key(self, request, pk=None, api_key_id=None):
+        """
+        Delete an API key.
+        
+        DELETE /api/v1/bots/{id}/api-keys/{api_key_id}/
+        """
+        bot = self.get_object()
+        
+        try:
+            api_key = BotAPIKey.objects.get(id=api_key_id, bot=bot)
+            api_key.delete()
+            return Response({
+                'message': 'API key deleted successfully'
+            }, status=status.HTTP_200_OK)
+        except BotAPIKey.DoesNotExist:
+            return Response(
+                {'error': 'API key not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )

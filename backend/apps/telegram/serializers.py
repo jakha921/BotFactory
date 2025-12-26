@@ -2,6 +2,7 @@
 Serializers for telegram app.
 """
 from rest_framework import serializers
+
 from apps.telegram.models import TelegramUser
 
 
@@ -14,6 +15,8 @@ class TelegramUserSerializer(serializers.ModelSerializer):
     lastActive = serializers.DateTimeField(source='last_active', read_only=True)
     messageCount = serializers.IntegerField(source='message_count', read_only=True)
     botId = serializers.UUIDField(source='bot.id', read_only=True)
+    # Expose telegram_id as camelCase telegramId for frontend
+    telegramId = serializers.CharField(source='telegram_id', read_only=True)
     
     class Meta:
         model = TelegramUser

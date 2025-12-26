@@ -41,7 +41,7 @@ export const Settings: React.FC = () => {
   const [formData, setFormData] = useState({
     name: user?.name || '',
     email: user?.email || '',
-    telegramId: user?.telegramId || '',
+    telegramId: user?.telegramId ? String(user.telegramId) : '',
   });
 
   // Mock Notification Preferences
@@ -67,7 +67,7 @@ export const Settings: React.FC = () => {
       setFormData({
         name: user.name || '',
         email: user.email || '',
-        telegramId: user.telegramId || '',
+        telegramId: user.telegramId ? String(user.telegramId) : '',
       });
     }
   }, [user]);
@@ -248,7 +248,7 @@ export const Settings: React.FC = () => {
                         onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       />
                     </div>
-                    
+
                     <Input
                       label="Telegram User ID"
                       type="number"

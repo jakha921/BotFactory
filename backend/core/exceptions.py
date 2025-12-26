@@ -1,12 +1,14 @@
 """
 Custom exceptions and exception handlers for Bot Factory API.
 """
-from rest_framework.views import exception_handler
-from rest_framework.exceptions import APIException
-from rest_framework import status
-from django.http import Http404
-from django.core.exceptions import PermissionDenied
 import logging
+
+from django.core.exceptions import PermissionDenied
+from django.http import Http404
+from rest_framework import status
+from rest_framework.exceptions import APIException
+from rest_framework.response import Response
+from rest_framework.views import exception_handler
 
 logger = logging.getLogger(__name__)
 

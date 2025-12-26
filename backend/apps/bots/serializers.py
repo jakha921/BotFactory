@@ -2,7 +2,7 @@
 Serializers for bots app.
 """
 from rest_framework import serializers
-from apps.bots.models import Bot
+from apps.bots.models import Bot, BotAPIKey
 
 
 class BotSerializer(serializers.ModelSerializer):
@@ -56,7 +56,8 @@ class BotSerializer(serializers.ModelSerializer):
             'temperature': instance.temperature,
             'systemInstruction': instance.system_instruction,
             'thinkingBudget': instance.thinking_budget,
-            'telegramToken': instance.telegram_token if instance.telegram_token else '',
+            # Return decrypted token so it matches frontend regex and can be edited
+            'telegramToken': instance.decrypted_telegram_token if instance.telegram_token else '',
             'avatar': instance.avatar if instance.avatar else '',
             'createdAt': instance.created_at.isoformat() if instance.created_at else None,
             'conversationsCount': instance.conversations_count,
@@ -110,6 +111,17 @@ class BotCreateSerializer(serializers.ModelSerializer):
         if value is not None and value < 0:
             raise serializers.ValidationError("Thinking budget must be non-negative")
         return value
+    
+    def validate_telegramToken(self, value):
+        """Validate telegram token format if provided."""
+        if value and value.strip():
+            # Must be plain token in format: 123456789:ABC...
+            import re
+            if not re.match(r'^\d+:[A-Za-z0-9_-]+$', value):
+                raise serializers.ValidationError(
+                    "Invalid Telegram bot token format. Expected format: 123456789:ABC..."
+                )
+        return value
 
 
 class BotUpdateSerializer(BotSerializer):
@@ -128,6 +140,19 @@ class BotUpdateSerializer(BotSerializer):
         """Validate thinking budget is non-negative."""
         if value is not None and value < 0:
             raise serializers.ValidationError("Thinking budget must be non-negative")
+        return value
+    
+    def validate_telegram_token(self, value):
+        """Validate telegram token format if provided."""
+        if value and value.strip():
+            # Check if it's already encrypted (starts with Fernet prefix)
+            if not value.startswith('gAAAAAB'):
+                # Must be plain token in format: 123456789:ABC...
+                import re
+                if not re.match(r'^\d+:[A-Za-z0-9_-]+$', value):
+                    raise serializers.ValidationError(
+                        "Invalid Telegram bot token format. Expected format: 123456789:ABC..."
+                    )
         return value
     
     def to_internal_value(self, data):
@@ -149,6 +174,46 @@ class BotUpdateSerializer(BotSerializer):
             internal_data[internal_key] = value
         
         return super().to_internal_value(internal_data)
+
+
+class BotAPIKeySerializer(serializers.ModelSerializer):
+    """Serializer for BotAPIKey model."""
+    key_prefix_display = serializers.CharField(source='key_prefix', read_only=True)
+    bot_name = serializers.CharField(source='bot.name', read_only=True)
+    
+    class Meta:
+        model = BotAPIKey
+        fields = [
+            'id',
+            'bot',
+            'bot_name',
+            'name',
+            'key_prefix_display',
+            'is_active',
+            'last_used_at',
+            'created_at',
+            'expires_at',
+        ]
+        read_only_fields = ['id', 'key', 'key_prefix', 'created_at', 'last_used_at']
+
+
+class BotAPIKeyCreateSerializer(serializers.Serializer):
+    """Serializer for creating API keys."""
+    name = serializers.CharField(max_length=100, required=True)
+    expires_at = serializers.DateTimeField(required=False, allow_null=True)
+    
+    def create(self, validated_data):
+        """Create a new API key for the bot."""
+        bot = self.context['bot']
+        name = validated_data['name']
+        expires_at = validated_data.get('expires_at')
+        
+        api_key_obj, plain_key = BotAPIKey.create_key(bot, name, expires_at)
+        
+        # Store plain key in context for response
+        self.context['plain_key'] = plain_key
+        
+        return api_key_obj
 
 
 class UIConfigSerializer(serializers.Serializer):
@@ -218,4 +283,3 @@ class UIConfigSerializer(serializers.Serializer):
                         raise serializers.ValidationError(f"Form '{form_name}' step must have '{field}' field")
         
         return value
-

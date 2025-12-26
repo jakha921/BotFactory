@@ -8,7 +8,7 @@ from apps.accounts.models import User
 
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model (for reading user data)."""
-    telegramId = serializers.IntegerField(source='telegram_id', read_only=True, allow_null=True)
+    telegramId = serializers.IntegerField(source='telegram_id', allow_null=True, required=False)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     
     class Meta:

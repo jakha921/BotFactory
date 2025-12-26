@@ -337,6 +337,53 @@ export const api = {
         message: string;
       }>(`bots/${id}/restart-bot/`, {});
     },
+    
+    getAPIKeys: async (id: string): Promise<Array<{
+      id: string;
+      name: string;
+      key_prefix: string;
+      is_active: boolean;
+      last_used_at: string | null;
+      created_at: string;
+      expires_at: string | null;
+    }>> => {
+      return client.get<Array<{
+        id: string;
+        name: string;
+        key_prefix_display: string;
+        is_active: boolean;
+        last_used_at: string | null;
+        created_at: string;
+        expires_at: string | null;
+      }>>(`bots/${id}/api-keys/`);
+    },
+    
+    createAPIKey: async (id: string, name: string, expiresAt?: string): Promise<{
+      id: string;
+      name: string;
+      key: string;
+      key_prefix: string;
+      created_at: string;
+      expires_at: string | null;
+      warning: string;
+    }> => {
+      return client.post<{
+        id: string;
+        name: string;
+        key: string;
+        key_prefix: string;
+        created_at: string;
+        expires_at: string | null;
+        warning: string;
+      }>(`bots/${id}/api-keys/`, {
+        name,
+        expires_at: expiresAt || null,
+      });
+    },
+    
+    deleteAPIKey: async (botId: string, apiKeyId: string): Promise<void> => {
+      return client.delete<void>(`bots/${botId}/api-keys/${apiKeyId}/`).then(() => undefined);
+    },
   },
 
   stats: {

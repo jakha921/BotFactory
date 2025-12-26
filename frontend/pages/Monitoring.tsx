@@ -114,7 +114,12 @@ export const Monitoring: React.FC = () => {
   const loadMessages = async (sessionId: string) => {
     try {
       const msgs = await api.chat.messages(sessionId);
-      setMessages(msgs);
+      // Convert timestamp strings to Date objects
+      const messagesWithDates = msgs.map((msg) => ({
+        ...msg,
+        timestamp: msg.timestamp instanceof Date ? msg.timestamp : new Date(msg.timestamp),
+      }));
+      setMessages(messagesWithDates);
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 100);
@@ -408,7 +413,7 @@ export const Monitoring: React.FC = () => {
                         msg.role === 'user' ? 'justify-end text-gray-500' : 'text-gray-500'
                       )}
                     >
-                      {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
 
                       {/* Bot Message Actions */}
                       {msg.role === 'model' && (

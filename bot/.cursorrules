@@ -33,6 +33,7 @@ Bot модуль на aiogram 3.x обеспечивает Telegram ботов �
 - **ruff / flake8:** Линтинг
 - **mypy:** Type checking (рекомендуется)
 - **pytest-asyncio:** Асинхронное тестирование
+- **uv:** Менеджер пакетов (рекомендуется вместо pip)
 
 ---
 
@@ -959,14 +960,35 @@ async def test_cmd_start():
 
 ## 🚀 Deployment
 
+### Virtual Environment Setup (ВАЖНО!)
+
+**Используй `uv` для создания venv:**
+```bash
+# Создание venv
+cd bot/
+uv venv .venv --python 3.11
+
+# Активация
+source .venv/bin/activate
+
+# Установка зависимостей
+uv pip install -r requirements.txt
+
+# Дополнительные зависимости для Django ORM
+uv pip install pgvector numpy google-generativeai langchain langchain-text-splitters langchain-google-genai
+```
+
+**НЕ используй `virtualenv` напрямую** — может создать сломанный venv с pip, указывающим на системный Python.
+
 ### Environment Variables
 
 ```bash
 # .env
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 DJANGO_API_URL=http://localhost:8000/api/v1
-DJANGO_SETTINGS_MODULE=bot_factory.settings.production
+DJANGO_SETTINGS_MODULE=bot_factory.settings.development
 LOG_LEVEL=INFO
+GEMINI_API_KEY=your_gemini_api_key
 ```
 
 ### Running Bot
@@ -1131,6 +1153,68 @@ async def generate_response_via_api(...):
             timeout=aiohttp.ClientTimeout(total=60)
         ) as response:
             return await response.json()
+```
+
+### Кэширование Bot Config
+
+**Проблема:** N+1 запрос при поиске бота по токену (дешифрует каждый токен)
+
+**Решение: Redis кэш для decrypted tokens:**
+```python
+import redis
+import json
+from typing import Optional
+
+redis_client = redis.Redis.from_url(os.getenv('REDIS_URL', 'redis://localhost:6379/0'))
+CACHE_TTL = 300  # 5 минут
+
+async def get_bot_by_token_cached(telegram_token: str) -> Optional[Bot]:
+    """Get bot by token with Redis caching."""
+    cache_key = f"bot:token:{telegram_token[:10]}"  # Не храним полный токен
+    
+    # Проверяем кэш
+    cached = redis_client.get(cache_key)
+    if cached:
+        bot_id = json.loads(cached)['bot_id']
+        return await sync_to_async(Bot.objects.get)(id=bot_id)
+    
+    # Ищем в БД
+    bot = await get_bot_by_token(telegram_token)
+    if bot:
+        redis_client.setex(
+            cache_key, 
+            CACHE_TTL, 
+            json.dumps({'bot_id': str(bot.id)})
+        )
+    
+    return bot
+```
+
+### Интеграция через API (альтернатива ORM)
+
+**Преимущества:**
+- Меньше связанность с Django моделями
+- Не нужно перезапускать бота при изменении моделей
+- Проще тестировать
+
+**Пример:**
+```python
+# services/api_client.py
+import httpx
+
+class BackendAPIClient:
+    def __init__(self, base_url: str, api_key: str = None):
+        self.base_url = base_url
+        self.api_key = api_key
+    
+    async def get_bot_by_token(self, token: str) -> dict:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.base_url}/bots/by-token/",
+                params={"token": token},
+                headers={"X-API-Key": self.api_key} if self.api_key else {}
+            )
+            return response.json()
 ```
 
 ---
@@ -1368,6 +1452,55 @@ async def handle_dynamic_action(callback: CallbackQuery, state: FSMContext):
 
 ---
 
-**Версия:** 1.1
-**Последнее обновление:** 2025-01-23
-**Добавлено:** Dynamic UI Configuration (keyboards, forms)
+---
+
+## 🐳 Запуск с Docker
+
+### Локальная разработка
+
+**Запуск backend сервисов:**
+```bash
+# Из корня проекта
+docker-compose up -d postgres redis
+
+# Проверка
+docker-compose ps
+```
+
+**Запуск бота:**
+```bash
+cd bot/
+source .venv/bin/activate
+PYTHONPATH=/path/to/bot-factory python main.py
+```
+
+### Production
+
+**Dockerfile для бота:**
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Установка uv
+RUN pip install uv
+
+# Копируем зависимости
+COPY bot/requirements.txt .
+RUN uv pip install --system -r requirements.txt
+
+# Копируем код
+COPY bot/ ./bot/
+COPY backend/ ./backend/
+
+ENV PYTHONPATH=/app
+ENV DJANGO_SETTINGS_MODULE=bot_factory.settings.production
+
+CMD ["python", "bot/main.py"]
+```
+
+---
+
+**Версия:** 1.2
+**Последнее обновление:** 2025-12-25
+**Изменения:** Добавлен uv для venv, кэширование, Docker, интеграция через API

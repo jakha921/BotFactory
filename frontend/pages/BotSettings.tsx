@@ -10,6 +10,11 @@ import {
   Brain,
   Sparkles,
   Loader2,
+  Key,
+  Plus,
+  Trash2,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/Button';
@@ -58,6 +63,22 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
   } | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
+  
+  // API Keys State
+  const [apiKeys, setApiKeys] = useState<Array<{
+    id: string;
+    name: string;
+    key_prefix: string;
+    is_active: boolean;
+    last_used_at: string | null;
+    created_at: string;
+    expires_at: string | null;
+  }>>([]);
+  const [isLoadingAPIKeys, setIsLoadingAPIKeys] = useState(false);
+  const [isCreatingAPIKey, setIsCreatingAPIKey] = useState(false);
+  const [newAPIKeyName, setNewAPIKeyName] = useState('');
+  const [newAPIKey, setNewAPIKey] = useState<string | null>(null);
+  const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
   
   // UI Config State
   const [uiConfig, setUIConfig] = useState<UIConfig>({
@@ -121,8 +142,9 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
           help_message: '',
           default_inline_keyboard: [],
         })),
+        api.bots.getAPIKeys(botId).catch(() => []),
       ])
-        .then(([bot, config]) => {
+        .then(([bot, config, keys]) => {
           if (bot) {
             setFormData(bot);
             setUIConfig({
@@ -132,6 +154,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
               help_message: config.help_message || bot.helpMessage || '',
               default_inline_keyboard: config.default_inline_keyboard || bot.defaultInlineKeyboard || [],
             });
+            setApiKeys(keys || []);
           }
         })
         .catch((error) => {
@@ -161,8 +184,78 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
         help_message: '',
         default_inline_keyboard: [],
       });
+      setApiKeys([]);
     }
   }, [botId]);
+  
+  // Load API keys when integrations tab is active
+  useEffect(() => {
+    if (activeTab === 'integrations' && botId && botId !== 'new') {
+      loadAPIKeys();
+    }
+  }, [activeTab, botId]);
+  
+  const loadAPIKeys = async () => {
+    if (!botId || botId === 'new') return;
+    setIsLoadingAPIKeys(true);
+    try {
+      const keys = await api.bots.getAPIKeys(botId);
+      setApiKeys(keys);
+    } catch (error: any) {
+      console.error('[BotSettings] Failed to load API keys:', error);
+      toast.error('Failed to load API keys');
+    } finally {
+      setIsLoadingAPIKeys(false);
+    }
+  };
+  
+  const handleCreateAPIKey = async () => {
+    if (!botId || botId === 'new') {
+      toast.error('Please save the bot first');
+      return;
+    }
+    if (!newAPIKeyName.trim()) {
+      toast.error('Please enter a name for the API key');
+      return;
+    }
+    
+    setIsCreatingAPIKey(true);
+    try {
+      const result = await api.bots.createAPIKey(botId, newAPIKeyName);
+      setNewAPIKey(result.key);
+      setNewAPIKeyName('');
+      await loadAPIKeys();
+      toast.success('API key created successfully');
+    } catch (error: any) {
+      console.error('[BotSettings] Failed to create API key:', error);
+      toast.error(error?.message || 'Failed to create API key');
+    } finally {
+      setIsCreatingAPIKey(false);
+    }
+  };
+  
+  const handleDeleteAPIKey = async (apiKeyId: string) => {
+    if (!botId || botId === 'new') return;
+    if (!confirm('Are you sure you want to delete this API key? This action cannot be undone.')) {
+      return;
+    }
+    
+    try {
+      await api.bots.deleteAPIKey(botId, apiKeyId);
+      await loadAPIKeys();
+      toast.success('API key deleted successfully');
+    } catch (error: any) {
+      console.error('[BotSettings] Failed to delete API key:', error);
+      toast.error(error?.message || 'Failed to delete API key');
+    }
+  };
+  
+  const handleCopyAPIKey = (key: string, keyId: string) => {
+    navigator.clipboard.writeText(key);
+    setCopiedKeyId(keyId);
+    toast.success('API key copied to clipboard');
+    setTimeout(() => setCopiedKeyId(null), 2000);
+  };
 
   const handleChange = (field: keyof BotType, value: any) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -689,7 +782,8 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
 
         {/* INTEGRATIONS TAB */}
         {activeTab === 'integrations' && (
-          <Card className="border-black/5 dark:border-white/5 animate-in fade-in slide-in-from-left-4 duration-300">
+          <div className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-300">
+          <Card className="border-black/5 dark:border-white/5">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Webhook className="w-5 h-5 text-blue-500" />
@@ -796,6 +890,139 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
               )}
             </CardContent>
           </Card>
+          
+          {/* Public API Keys Section */}
+          {botId && botId !== 'new' && (
+            <Card className="border-black/5 dark:border-white/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Key className="w-5 h-5 text-purple-500" />
+                  Public API Keys
+                </CardTitle>
+                <CardDescription>
+                  Create API keys for external services to access this bot.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* New API Key Creation */}
+                {newAPIKey && (
+                  <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Check className="w-5 h-5 text-green-600 dark:text-green-400" />
+                      <h4 className="font-medium text-green-800 dark:text-green-300">
+                        API Key Created Successfully!
+                      </h4>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-sm text-green-700 dark:text-green-400">
+                        Save this key securely. It will not be shown again.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 px-3 py-2 bg-white dark:bg-gray-800 border border-green-300 dark:border-green-700 rounded text-sm font-mono break-all">
+                          {newAPIKey}
+                        </code>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon={copiedKeyId === 'new' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                          onClick={() => handleCopyAPIKey(newAPIKey, 'new')}
+                        >
+                          Copy
+                        </Button>
+                      </div>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setNewAPIKey(null)}
+                    >
+                      Close
+                    </Button>
+                  </div>
+                )}
+                
+                {/* Create New Key Form */}
+                {!newAPIKey && (
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="API Key Name (e.g., Production, Development)"
+                      value={newAPIKeyName}
+                      onChange={(e) => setNewAPIKeyName(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Button
+                      onClick={handleCreateAPIKey}
+                      isLoading={isCreatingAPIKey}
+                      disabled={!newAPIKeyName.trim() || isCreatingAPIKey}
+                      icon={<Plus className="w-4 h-4" />}
+                    >
+                      Create Key
+                    </Button>
+                  </div>
+                )}
+                
+                {/* API Keys List */}
+                {isLoadingAPIKeys ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+                  </div>
+                ) : apiKeys.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                    <Key className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                    <p>No API keys created yet</p>
+                    <p className="text-sm mt-1">Create one to allow external services to access this bot</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {apiKeys.map((key) => (
+                      <div
+                        key={key.id}
+                        className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900/50 border border-black/5 dark:border-white/5 rounded-lg"
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{key.name}</span>
+                            {key.is_active ? (
+                              <span className="px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">
+                                Active
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded">
+                                Inactive
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-1 flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                            <code className="font-mono">{key.key_prefix}...</code>
+                            <span>Created: {new Date(key.created_at).toLocaleDateString()}</span>
+                            {key.last_used_at && (
+                              <span>Last used: {new Date(key.last_used_at).toLocaleDateString()}</span>
+                            )}
+                          </div>
+                        </div>
+                        <Button
+                          variant="icon"
+                          size="sm"
+                          onClick={() => handleDeleteAPIKey(key.id)}
+                          className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {/* API Usage Info */}
+                <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                  <p className="text-sm text-blue-700 dark:text-blue-400">
+                    <strong>Usage:</strong> Include the API key in the <code className="px-1 py-0.5 bg-blue-100 dark:bg-blue-900/30 rounded">X-API-Key</code> header when making requests to <code className="px-1 py-0.5 bg-blue-100 dark:bg-blue-900/30 rounded">/api/v1/public/chat/</code>
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          </div>
         )}
       </div>
     </div>

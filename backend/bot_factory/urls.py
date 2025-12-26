@@ -8,6 +8,13 @@ from apps.accounts.views import subscription_usage_view
 from django.conf import settings
 from django.conf.urls.static import static
 from unfold.decorators import display
+from drf_spectacular.views import (
+    SpectacularAPIView,
+    SpectacularRedocView,
+    SpectacularSwaggerView,
+)
+from apps.bots.public_views import PublicChatView
+from apps.core.health_views import HealthCheckView, ReadinessCheckView
 
 # Customize admin site
 admin.site.site_header = "Bot Factory Administration"
@@ -19,9 +26,21 @@ urlpatterns = [
     # Admin site (django-unfold)
     path('admin/', admin.site.urls),
     
+    # API Documentation (OpenAPI/Swagger)
+    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
+    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+    
+    # Health check endpoints
+    path('api/health/', HealthCheckView.as_view(), name='health-check'),
+    path('api/health/ready/', ReadinessCheckView.as_view(), name='readiness-check'),
+    
     # Webhook endpoint for Telegram updates (must be before API routes)
     # POST /webhook/<token>/
     path('webhook/<str:token>/', include('apps.telegram.webhook_urls')),
+    
+    # Public API (API key authentication)
+    path('api/v1/public/chat/', PublicChatView.as_view(), name='public-chat'),
     
     # API v1 endpoints
     path('api/v1/auth/', include('apps.accounts.urls')),

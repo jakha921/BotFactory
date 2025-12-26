@@ -3,19 +3,20 @@ Views for knowledge app.
 DocumentViewSet and DocumentChunkViewSet for knowledge base management.
 """
 import threading
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 
-from apps.knowledge.models import Document, DocumentChunk
+from apps.knowledge.models import Document, DocumentChunk, TextSnippet
 from apps.bots.models import Bot
 from apps.knowledge.serializers import (
     DocumentSerializer,
     DocumentUploadSerializer,
     DocumentChunkSerializer,
+    TextSnippetSerializer,
 )
 from core.permissions import IsOwnerOrReadOnly
 from .services import process_document
@@ -34,7 +35,8 @@ class DocumentViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Filter documents by bot and ensure user owns the bot."""
-        bot_id = self.kwargs.get('bot_id')
+        # NestedSimpleRouter passes parent lookup as `<lookup>_pk`, i.e. `bot_pk`
+        bot_id = self.kwargs.get('bot_pk') or self.kwargs.get('bot_id')
         if bot_id:
             bot = get_object_or_404(Bot, id=bot_id, owner=self.request.user)
             return Document.objects.filter(bot=bot)
@@ -46,8 +48,9 @@ class DocumentViewSet(viewsets.ModelViewSet):
             return DocumentUploadSerializer
         return DocumentSerializer
     
-    def create(self, request, bot_id=None):
+    def create(self, request, *args, **kwargs):
         """Upload a document for a bot."""
+        bot_id = kwargs.get('bot_pk') or kwargs.get('bot_id')
         bot = get_object_or_404(Bot, id=bot_id, owner=request.user)
         
         serializer = DocumentUploadSerializer(data=request.data)
@@ -63,7 +66,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED
         )
     
-    def list(self, request, bot_id=None):
+    def list(self, request, *args, **kwargs):
         """List documents for a bot."""
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
@@ -92,3 +95,55 @@ class DocumentChunkViewSet(viewsets.ModelViewSet):
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
+
+
+class TextSnippetViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing text snippets.
+    
+    list: GET /api/v1/snippets/?bot_id={bot_id} - List snippets for a bot
+    create: POST /api/v1/snippets/ - Create a snippet
+    update: PATCH /api/v1/snippets/{id}/ - Update a snippet
+    destroy: DELETE /api/v1/snippets/{id}/ - Delete a snippet
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = TextSnippetSerializer
+    
+    def get_queryset(self):
+        """Filter snippets by bot and ensure user owns the bot."""
+        bot_id = self.request.query_params.get('bot_id')
+        if bot_id:
+            bot = get_object_or_404(Bot, id=bot_id, owner=self.request.user)
+            return TextSnippet.objects.filter(bot=bot)
+        # If no bot_id, return empty queryset
+        return TextSnippet.objects.none()
+    
+    def perform_create(self, serializer):
+        """Create a snippet and ensure user owns the bot."""
+        bot = serializer.validated_data.get("bot")
+        if not bot:
+            raise serializers.ValidationError({'bot': 'This field is required.'})
+        
+        # Ensure the authenticated user owns the bot referenced by this snippet
+        try:
+            Bot.objects.get(id=bot.id, owner=self.request.user)
+        except Bot.DoesNotExist:
+            raise serializers.ValidationError({
+                'bot': 'Bot not found or you do not have permission to access it.'
+            })
+        
+        # `bot` instance is already in validated_data, so just save
+        serializer.save()
+    
+    def perform_update(self, serializer):
+        """Update a snippet and ensure user owns the bot."""
+        instance = self.get_object()
+        # Ensure user owns the bot
+        get_object_or_404(Bot, id=instance.bot.id, owner=self.request.user)
+        
+        # If bot is being changed, verify ownership of new bot
+        if 'bot' in serializer.validated_data:
+            new_bot = serializer.validated_data.get('bot')
+            get_object_or_404(Bot, id=new_bot.id, owner=self.request.user)
+        
+        serializer.save()

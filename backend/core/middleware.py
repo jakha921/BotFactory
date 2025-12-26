@@ -90,3 +90,52 @@ class DisallowedHostBypassMiddleware(MiddlewareMixin):
         
         return None
 
+
+import time
+
+request_logger = logging.getLogger('django.request')
+
+
+class APIRequestLoggingMiddleware(MiddlewareMixin):
+    """
+    Middleware for logging API requests with timing information.
+    Logs request method, path, response status, and duration.
+    """
+    
+    def process_request(self, request):
+        """Store request start time."""
+        request._start_time = time.time()
+        return None
+    
+    def process_response(self, request, response):
+        """Log request details after processing."""
+        if hasattr(request, '_start_time'):
+            duration = time.time() - request._start_time
+            
+            # Only log API requests
+            if request.path.startswith('/api/'):
+                request_logger.info(
+                    f"API Request: {request.method} {request.path} "
+                    f"Status:{response.status_code} "
+                    f"Duration:{duration*1000:.2f}ms "
+                    f"User:{getattr(request.user, 'email', 'Anonymous')}",
+                    extra={
+                        'method': request.method,
+                        'path': request.path,
+                        'status_code': response.status_code,
+                        'duration_ms': round(duration * 1000, 2),
+                        'user': str(request.user) if request.user.is_authenticated else 'Anonymous',
+                        'ip': self.get_client_ip(request),
+                    }
+                )
+        
+        return response
+    
+    def get_client_ip(self, request):
+        """Get client IP address from request."""
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(',')[0]
+        else:
+            ip = request.META.get('REMOTE_ADDR')
+        return ip

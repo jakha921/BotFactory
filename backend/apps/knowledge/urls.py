@@ -4,13 +4,14 @@ URLs for knowledge app.
 from django.urls import path, include
 from rest_framework_nested.routers import SimpleRouter, NestedSimpleRouter
 
-from apps.knowledge.views import DocumentViewSet, DocumentChunkViewSet
+from apps.knowledge.views import DocumentViewSet, DocumentChunkViewSet, TextSnippetViewSet
 from apps.bots.views import BotViewSet
 
 app_name = 'knowledge'
 
 router = SimpleRouter()
 router.register(r'bots', BotViewSet, basename='bot')
+router.register(r'snippets', TextSnippetViewSet, basename='snippet')
 
 bots_router = NestedSimpleRouter(router, r'bots', lookup='bot')
 bots_router.register(r'documents', DocumentViewSet, basename='bot-documents')

@@ -23,10 +23,18 @@ django-environ>=0.11.0
 
 # Database (for PostgreSQL support)
 psycopg2-binary>=2.9.0
+pgvector>=0.4.0  # For vector embeddings (Django models)
+numpy>=2.0.0  # Required by pgvector
 
 # HTTP client for API calls (optional, for direct API integration)
 aiohttp>=3.9.0
 httpx>=0.25.0
+
+# AI Integration (for Gemini API)
+google-generativeai>=0.8.0
+langchain>=1.0.0
+langchain-text-splitters>=1.0.0
+langchain-google-genai>=4.0.0
 
 # Utilities
 python-dateutil>=2.8.2

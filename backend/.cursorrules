@@ -560,9 +560,68 @@ urlpatterns = [
 
 ### API Security
 - CORS настройки для frontend
-- Rate limiting для API endpoints
+- Rate limiting для API endpoints (см. ниже)
 - Хеширование sensitive данных (telegram tokens)
 - Используй HTTPS в production
+
+### Rate Limiting (ВАЖНО!)
+
+**Реализация в `apps/accounts/views.py`:**
+```python
+from django.core.cache import cache
+from rest_framework.exceptions import Throttled
+
+def rate_limit(key_prefix: str, limit: int = 5, period: int = 60):
+    """Rate limiting decorator using Django cache."""
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapped_view(request, *args, **kwargs):
+            # Get client IP
+            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+            ip = x_forwarded_for.split(',')[0].strip() if x_forwarded_for else request.META.get('REMOTE_ADDR')
+            
+            cache_key = f"ratelimit:{key_prefix}:{ip}"
+            current_count = cache.get(cache_key, 0)
+            
+            if current_count >= limit:
+                raise Throttled(detail={'message': 'Too many requests', 'retry_after': period})
+            
+            cache.set(cache_key, current_count + 1, period)
+            return view_func(request, *args, **kwargs)
+        return wrapped_view
+    return decorator
+
+# Использование:
+@api_view(['POST'])
+@rate_limit('login', limit=5, period=60)  # 5 попыток в минуту
+def login_view(request):
+    ...
+```
+
+**Лимиты по умолчанию:**
+- Login: 5 попыток/минуту на IP
+- Register: 3 регистрации/час на IP
+- Password Reset: 3 запроса/час на IP
+- API общий: 100 запросов/минуту на пользователя
+
+### Error Handling для API
+
+**Не раскрывай внутренние ошибки пользователям:**
+```python
+# BAD
+raise Exception(f"Gemini API error: {str(e)}")
+
+# GOOD
+logger.error(f"Gemini API error: {str(e)}", exc_info=True)
+raise GeminiAPIError("Failed to generate response. Please try again.")
+```
+
+**Кастомные исключения в `services/gemini.py`:**
+```python
+class GeminiAPIError(Exception):
+    """Custom exception for Gemini API errors that hides internal details."""
+    pass
+```
 
 ---
 
@@ -616,10 +675,37 @@ class TestBotSerializer:
 # Используй django-environ для управления переменными окружения
 ```
 
+### Docker Compose (Локальная разработка)
+
+**Запуск PostgreSQL + Redis:**
+```bash
+# Запуск сервисов
+docker-compose up -d
+
+# С pgAdmin (опционально)
+docker-compose --profile tools up -d
+
+# Остановка
+docker-compose down
+```
+
+**Сервисы:**
+- PostgreSQL 16 + pgvector: `localhost:5432`
+- Redis 7: `localhost:6379`
+- pgAdmin (опционально): `localhost:5050`
+
 ### Environment Variables (.env.example)
 ```bash
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/bot_factory_db
+# Database (PostgreSQL - рекомендуется для pgvector)
+DB_NAME=bot_factory_db
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_HOST=localhost
+DB_PORT=5432
+
+# Для SQLite (pgvector НЕ работает):
+# DB_NAME=db.sqlite3
+# DB_ENGINE=sqlite3
 
 # Django
 SECRET_KEY=your-secret-key-here
@@ -630,14 +716,33 @@ ALLOWED_HOSTS=localhost,127.0.0.1
 GEMINI_API_KEY=your-gemini-api-key
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token
 
-# JWT
-JWT_SECRET_KEY=your-jwt-secret-key
+# Redis (для кэширования и rate limiting)
+REDIS_URL=redis://localhost:6379/0
 
 # CORS
 CORS_ALLOWED_ORIGINS=http://localhost:3000
+```
 
-# Redis (для Celery и кэширования)
-REDIS_URL=redis://localhost:6379/0
+### Cache Configuration
+
+**base.py:**
+```python
+# Локальная память для development
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
+    }
+}
+
+# Redis для production
+if REDIS_URL and not DEBUG:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+        }
+    }
 ```
 
 ---
@@ -764,5 +869,47 @@ REDIS_URL=redis://localhost:6379/0
 
 ---
 
-**Версия:** 1.0
-**Последнее обновление:** 2025-01-22
+---
+
+## 🔄 Async Views (Django 4.1+)
+
+### Паттерн для I/O операций
+
+**Используй async views для внешних API вызовов:**
+```python
+from django.http import JsonResponse
+from asgiref.sync import sync_to_async
+
+# Async view
+async def generate_response_view(request):
+    """Async view for Gemini API calls."""
+    data = json.loads(request.body)
+    
+    # Sync to async для Django ORM
+    bot = await sync_to_async(Bot.objects.get)(id=data['bot_id'])
+    
+    # Async HTTP вызов
+    async with aiohttp.ClientSession() as session:
+        response = await session.post(GEMINI_URL, json=payload)
+        result = await response.json()
+    
+    return JsonResponse(result)
+
+# urls.py
+path('api/v1/generate/', generate_response_view),
+```
+
+**Когда использовать async views:**
+- Вызовы внешних API (Gemini, Telegram)
+- Операции с файлами
+- Долгие I/O операции
+
+**Когда НЕ использовать:**
+- Простые CRUD операции (Django ORM и так эффективен)
+- Операции только с базой данных
+
+---
+
+**Версия:** 1.1
+**Последнее обновление:** 2025-12-25
+**Изменения:** Добавлен rate limiting, async views, Docker Compose

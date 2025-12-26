@@ -117,6 +117,8 @@ class ChatMessage(models.Model):
         ordering = ['timestamp']
         indexes = [
             models.Index(fields=['session', 'timestamp']),
+            models.Index(fields=['role', 'timestamp']),
+            models.Index(fields=['timestamp']),
             models.Index(fields=['role']),
             models.Index(fields=['is_flagged']),
         ]

@@ -2,9 +2,18 @@
 Google Gemini API integration service.
 """
 import os
+import re
+import logging
 from typing import Optional, List, Dict, Any
 import google.generativeai as genai
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
+
+
+class GeminiAPIError(Exception):
+    """Custom exception for Gemini API errors that hides internal details."""
+    pass
 
 
 class GeminiService:
@@ -12,9 +21,15 @@ class GeminiService:
     
     def __init__(self):
         """Initialize Gemini service with API key."""
-        api_key = os.environ.get('GEMINI_API_KEY') or settings.GEMINI_API_KEY
+        api_key = os.environ.get('GEMINI_API_KEY') or getattr(settings, 'GEMINI_API_KEY', None)
         if not api_key:
-            raise ValueError("GEMINI_API_KEY is not set")
+            logger.error("GEMINI_API_KEY is not configured")
+            raise GeminiAPIError("AI service is not configured. Please contact administrator.")
+        
+        # Validate API key format (basic check)
+        if not api_key.startswith('AI') or len(api_key) < 30:
+            logger.error("GEMINI_API_KEY appears to be invalid")
+            raise GeminiAPIError("AI service configuration error. Please contact administrator.")
         
         genai.configure(api_key=api_key)
         self.client = genai
@@ -95,7 +110,6 @@ class GeminiService:
             
             # Clean markdown formatting from response
             # Remove common markdown symbols
-            import re
             # Remove bold/italic markers
             text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # **text**
             text = re.sub(r'\*([^*]+)\*', r'\1', text)  # *text*
@@ -143,8 +157,26 @@ class GeminiService:
                 'groundingChunks': grounding_chunks
             }
         
+        except genai.types.BlockedPromptException as e:
+            logger.warning(f"Gemini blocked prompt: {str(e)}")
+            raise GeminiAPIError("Your message was blocked by content filters. Please rephrase.")
+        except genai.types.StopCandidateException as e:
+            logger.warning(f"Gemini stopped generation: {str(e)}")
+            raise GeminiAPIError("Response generation was interrupted. Please try again.")
         except Exception as e:
-            raise Exception(f"Gemini API error: {str(e)}")
+            # Log the actual error for debugging, but return generic message to user
+            logger.error(f"Gemini API error: {str(e)}", exc_info=True)
+            
+            # Check for common error patterns and provide helpful messages
+            error_str = str(e).lower()
+            if 'quota' in error_str or 'rate' in error_str:
+                raise GeminiAPIError("AI service is temporarily busy. Please try again in a moment.")
+            elif 'invalid' in error_str and 'key' in error_str:
+                raise GeminiAPIError("AI service configuration error. Please contact administrator.")
+            elif 'timeout' in error_str:
+                raise GeminiAPIError("AI service timed out. Please try a shorter message.")
+            else:
+                raise GeminiAPIError("Failed to generate response. Please try again.")
 
 
 # Global service instance

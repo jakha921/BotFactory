@@ -52,25 +52,54 @@ async def generate_bot_response(
     try:
         @sync_to_async
         def _get_rag_context(prompt):
-            # 1. Embed the user's prompt
-            embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-            prompt_embedding = embeddings.embed_query(prompt)
+            try:
+                # 1. Embed the user's prompt
+                embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+                prompt_embedding = embeddings.embed_query(prompt)
 
-            # 2. Query the vector database for relevant chunks
-            chunks = DocumentChunk.objects.filter(document__bot=bot).order_by(
-                L2Distance('embedding', prompt_embedding)
-            )[:5]
+                # 2. Query the vector database for relevant document chunks
+                doc_chunks = list(
+                    DocumentChunk.objects.filter(document__bot=bot).order_by(
+                        L2Distance('embedding', prompt_embedding)
+                    )[:3]  # Top 3 most relevant chunks
+                )
 
-            # 3. Augment the system instruction with the retrieved chunks
-            context = "\n\n".join([chunk.text for chunk in chunks])
-            return context
+                # 3. Query text snippets
+                from apps.knowledge.models import TextSnippet
+                snippet_chunks = list(
+                    TextSnippet.objects.filter(
+                        bot=bot,
+                        embedding__isnull=False
+                    ).order_by(
+                        L2Distance('embedding', prompt_embedding)
+                    )[:3]  # Top 3 most relevant snippets
+                )
+
+                # 4. Combine context
+                context_parts = []
+                if doc_chunks:
+                    context_parts.append("## Relevant Document Content:")
+                    for chunk in doc_chunks:
+                        context_parts.append(f"- {chunk.text[:500]}...")  # Limit chunk size
+                
+                if snippet_chunks:
+                    context_parts.append("\n## Relevant Knowledge Base Snippets:")
+                    for snippet in snippet_chunks:
+                        context_parts.append(f"- {snippet.title}: {snippet.content[:500]}...")
+                
+                if context_parts:
+                    return "\n".join(context_parts)
+                return None
+            except Exception as e:
+                logger.warning(f"Failed to retrieve RAG context: {str(e)}")
+                return None
 
         rag_context = await _get_rag_context(prompt)
         
         system_instruction = bot.system_instruction or "You are a helpful AI assistant."
         
         if rag_context:
-            system_instruction = f"{system_instruction}\n\n## Context from documents:\n{rag_context}"
+            system_instruction = f"{system_instruction}\n\n{rag_context}"
         
         # Use sync_to_async for Django service
         @sync_to_async

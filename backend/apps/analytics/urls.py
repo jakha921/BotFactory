@@ -6,6 +6,8 @@ from apps.analytics.views import (
     DashboardStatsView,
     ChartDataView,
     RecentActivityView,
+    TokenUsageView,
+    RetentionView,
 )
 
 app_name = 'analytics'
@@ -14,5 +16,6 @@ urlpatterns = [
     path('stats/', DashboardStatsView.as_view(), name='dashboard-stats'),
     path('stats/chart/', ChartDataView.as_view(), name='chart-data'),
     path('stats/activity/', RecentActivityView.as_view(), name='recent-activity'),
+    path('stats/tokens/', TokenUsageView.as_view(), name='token-usage'),
+    path('stats/retention/', RetentionView.as_view(), name='retention'),
 ]
-

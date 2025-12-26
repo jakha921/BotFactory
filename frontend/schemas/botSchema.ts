@@ -34,8 +34,16 @@ export const botSchema = z.object({
   thinkingBudget: z.number().int().min(0).max(32768).optional(),
   telegramToken: z
     .string()
-    .regex(/^\d+:[A-Za-z0-9_-]+$/, 'Invalid Telegram bot token format')
     .optional()
+    .refine(
+      (val) => {
+        // Allow empty string or undefined
+        if (!val || val === '') return true;
+        // If provided, must match Telegram token format
+        return /^\d+:[A-Za-z0-9_-]+$/.test(val);
+      },
+      { message: 'Invalid Telegram bot token format. Expected format: 123456789:ABC...' }
+    )
     .or(z.literal('')),
   avatar: z.string().max(200, 'Avatar URL is too long').optional().or(z.literal('')),
   createdAt: z.string().optional(),

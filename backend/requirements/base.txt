@@ -2,6 +2,13 @@
 Django>=5.0,<6.0
 djangorestframework>=3.15.0
 djangorestframework-simplejwt>=5.3.0
+drf-nested-routers>=0.93.0  # For nested routers
+
+# Security
+django-ratelimit>=4.1.0  # Rate limiting for API endpoints
+
+# API Documentation
+drf-spectacular>=0.27.0  # OpenAPI 3.0 schema generation
 
 # Admin
 django-unfold>=0.2.0
@@ -11,6 +18,7 @@ django-cors-headers>=4.3.0
 
 # Database
 psycopg2-binary>=2.9.0
+pgvector>=0.2.0  # For vector embeddings
 
 # Environment variables
 django-environ>=0.11.0
@@ -21,6 +29,9 @@ django-filter>=23.3
 
 # AI Integration
 google-generativeai>=0.3.0
+langchain>=0.1.0  # For text splitting and processing
+langchain-text-splitters>=0.0.1  # For document chunking
+langchain-google-genai>=1.0.0  # For Google Gemini embeddings
 
 # Utilities
 Pillow>=10.0.0  # For image handling
@@ -30,7 +41,7 @@ SpeechRecognition>=3.10.0  # For audio transcription
 pydub>=0.25.1  # For audio format conversion
 
 # File processing
-PyPDF2>=3.0.0  # For PDF text extraction
+pypdf>=3.0.0  # For PDF text extraction
 python-docx>=1.1.0  # For DOCX text extraction
 pytesseract>=0.3.10  # For OCR (image text extraction)
 pdf2image>=1.16.3  # For PDF to image conversion (OCR)

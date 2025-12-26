@@ -2,6 +2,9 @@
 Views for accounts app.
 Authentication views for Bot Factory API.
 """
+import logging
+from functools import wraps
+
 from rest_framework import status, generics, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
@@ -9,22 +12,68 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password
+from django.core.cache import cache
+from django.conf import settings
 
 from apps.accounts.serializers import (
     UserSerializer,
     UserRegisterSerializer,
     UserUpdateSerializer,
 )
-from rest_framework.exceptions import AuthenticationFailed, ValidationError as DRFValidationError
+from rest_framework.exceptions import AuthenticationFailed, ValidationError as DRFValidationError, Throttled
 from apps.bots.models import Bot
 from apps.knowledge.models import Document
 
+logger = logging.getLogger(__name__)
 User = get_user_model()
+
+
+# Rate limiting decorator for auth endpoints
+def rate_limit(key_prefix: str, limit: int = 5, period: int = 60):
+    """
+    Simple rate limiting decorator using Django cache.
+    
+    Args:
+        key_prefix: Prefix for cache key (e.g., 'login', 'register')
+        limit: Maximum number of requests allowed
+        period: Time period in seconds
+    """
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapped_view(request, *args, **kwargs):
+            # Get client IP
+            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+            if x_forwarded_for:
+                ip = x_forwarded_for.split(',')[0].strip()
+            else:
+                ip = request.META.get('REMOTE_ADDR', 'unknown')
+            
+            # Create cache key
+            cache_key = f"ratelimit:{key_prefix}:{ip}"
+            
+            # Get current count
+            current_count = cache.get(cache_key, 0)
+            
+            if current_count >= limit:
+                logger.warning(f"Rate limit exceeded for {key_prefix} from IP: {ip}")
+                raise Throttled(detail={
+                    'message': f'Too many requests. Please try again in {period} seconds.',
+                    'code': 'rate_limit_exceeded',
+                    'retry_after': period
+                })
+            
+            # Increment count
+            cache.set(cache_key, current_count + 1, period)
+            
+            return view_func(request, *args, **kwargs)
+        return wrapped_view
+    return decorator
 
 
 class RegisterView(generics.CreateAPIView):
     """
     User registration endpoint.
+    Rate limited to 3 registrations per hour per IP.
     
     POST /api/v1/auth/register/
     """
@@ -34,9 +83,30 @@ class RegisterView(generics.CreateAPIView):
     
     def create(self, request, *args, **kwargs):
         """Create a new user and return JWT tokens."""
+        # Rate limiting for registration
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(',')[0].strip()
+        else:
+            ip = request.META.get('REMOTE_ADDR', 'unknown')
+        
+        cache_key = f"ratelimit:register:{ip}"
+        current_count = cache.get(cache_key, 0)
+        
+        if current_count >= 3:  # 3 registrations per hour
+            logger.warning(f"Registration rate limit exceeded from IP: {ip}")
+            raise Throttled(detail={
+                'message': 'Too many registration attempts. Please try again later.',
+                'code': 'rate_limit_exceeded',
+                'retry_after': 3600
+            })
+        
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        
+        # Increment registration count
+        cache.set(cache_key, current_count + 1, 3600)  # 1 hour
         
         # Generate JWT tokens
         refresh = RefreshToken.for_user(user)
@@ -52,9 +122,11 @@ class RegisterView(generics.CreateAPIView):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@rate_limit('login', limit=5, period=60)  # 5 attempts per minute
 def login_view(request):
     """
     User login endpoint.
+    Rate limited to 5 attempts per minute per IP.
     
     POST /api/v1/auth/login/
     Body: { "email": "user@example.com", "password": "password123" }
