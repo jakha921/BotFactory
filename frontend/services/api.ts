@@ -32,7 +32,7 @@ const getApiUrl = (path: string): string => {
 const parseError = async (response: Response): Promise<ApiError> => {
   try {
     const data = await response.json();
-    
+
     // Django error format: { error: { message, code, status, details } }
     if (data.error) {
       return {
@@ -41,7 +41,7 @@ const parseError = async (response: Response): Promise<ApiError> => {
         code: data.error.code,
       };
     }
-    
+
     // DRF validation error format
     if (response.status === 400 && typeof data === 'object') {
       const messages: string[] = [];
@@ -58,7 +58,7 @@ const parseError = async (response: Response): Promise<ApiError> => {
         code: 'validation_error',
       };
     }
-    
+
     return {
       message: data.message || data.detail || `HTTP ${response.status}: ${response.statusText}`,
       status: response.status,
@@ -78,7 +78,7 @@ const client = {
     try {
       const token = getAccessToken();
       const headers: HeadersInit = {};
-      
+
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
@@ -114,7 +114,7 @@ const client = {
     try {
       const token = getAccessToken();
       const headers: HeadersInit = {};
-      
+
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
@@ -153,7 +153,7 @@ const client = {
       const headers: HeadersInit = {
         'Content-Type': 'application/json',
       };
-      
+
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
@@ -186,7 +186,7 @@ const client = {
     try {
       const token = getAccessToken();
       const headers: HeadersInit = {};
-      
+
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
@@ -254,41 +254,41 @@ export const api = {
       // Fallback: return empty array
       return [];
     },
-    
+
     get: async (id: string): Promise<Bot> => {
       return client.get<Bot>(`bots/${id}/`);
     },
-    
+
     save: (bot: BotCreateInput): Promise<Bot> => {
       const isUpdate = !!bot.id;
       const url = isUpdate ? `bots/${bot.id}/` : 'bots/';
       const method = isUpdate ? client.patch : client.post;
-      
+
       // Remove id for both create and update (id comes from URL for update)
       const { id, ...botData } = bot;
       // Clean up undefined values
       const payload = Object.fromEntries(
         Object.entries(botData).filter(([_, v]) => v !== undefined)
       );
-      
+
       return method<Bot, typeof payload>(url, payload);
     },
-    
+
     delete: (id: string): Promise<void> =>
       client.delete<void>(`bots/${id}/`).then(() => undefined),
-    
+
     getUIConfig: async (id: string): Promise<UIConfig> => {
       return client.get<UIConfig>(`bots/${id}/ui-config/`);
     },
-    
+
     updateUIConfig: (id: string, config: Partial<UIConfig>): Promise<UIConfig> => {
       return client.post<UIConfig, Partial<UIConfig>>(`bots/${id}/ui-config/`, config);
     },
-    
+
     getKeyboard: async (id: string, keyboardName: string): Promise<{ keyboard_name: string; config: InlineKeyboardButton[][] }> => {
       return client.get<{ keyboard_name: string; config: InlineKeyboardButton[][] }>(`bots/${id}/keyboards/${keyboardName}/`);
     },
-    
+
     testTelegramConnection: async (id: string): Promise<{
       success: boolean;
       bot_info: {
@@ -315,7 +315,7 @@ export const api = {
         has_telegram_id?: boolean;
       }>(`bots/${id}/test-telegram-connection/`);
     },
-    
+
     getBotStatus: async (id: string): Promise<{
       is_running: boolean;
       last_heartbeat: string | null;
@@ -327,7 +327,7 @@ export const api = {
         error: string | null;
       }>(`bots/${id}/bot-status/`);
     },
-    
+
     restartBot: async (id: string): Promise<{
       success: boolean;
       message: string;
@@ -337,7 +337,7 @@ export const api = {
         message: string;
       }>(`bots/${id}/restart-bot/`, {});
     },
-    
+
     getAPIKeys: async (id: string): Promise<Array<{
       id: string;
       name: string;
@@ -357,7 +357,7 @@ export const api = {
         expires_at: string | null;
       }>>(`bots/${id}/api-keys/`);
     },
-    
+
     createAPIKey: async (id: string, name: string, expiresAt?: string): Promise<{
       id: string;
       name: string;
@@ -380,7 +380,7 @@ export const api = {
         expires_at: expiresAt || null,
       });
     },
-    
+
     deleteAPIKey: async (botId: string, apiKeyId: string): Promise<void> => {
       return client.delete<void>(`bots/${botId}/api-keys/${apiKeyId}/`).then(() => undefined);
     },
@@ -393,12 +393,12 @@ export const api = {
       const { mapKPIData } = await import('../utils/iconMapper');
       return data.map(mapKPIData);
     },
-    
+
     chart: (period: string): Promise<Array<{ name: string; value: number }>> =>
       client.get<Array<{ name: string; value: number }>>(
-            `stats/chart/?period=${encodeURIComponent(period)}`
-          ),
-    
+        `stats/chart/?period=${encodeURIComponent(period)}`
+      ),
+
     activity: (): Promise<
       Array<{
         id: number | string;
@@ -411,22 +411,22 @@ export const api = {
       }>
     > =>
       client.get<
-            Array<{
-              id: number | string;
-              title: string;
-              description: string;
-              time: string;
-              user: string;
-              icon: LucideIcon;
-              status: 'success' | 'warning' | 'info' | string;
-            }>
-          >('stats/activity/'),
+        Array<{
+          id: number | string;
+          title: string;
+          description: string;
+          time: string;
+          user: string;
+          icon: LucideIcon;
+          status: 'success' | 'warning' | 'info' | string;
+        }>
+      >('stats/activity/'),
   },
 
   users: {
     list: (botId: string): Promise<TelegramUser[]> =>
       client.get<TelegramUser[]>(`bots/${botId}/users/`),
-    
+
     updateStatus: async (userId: string, status: UpdateUserStatusPayload): Promise<void> => {
       await client.post<void, UpdateUserStatusPayload>(`users/${userId}/status/`, status);
     },
@@ -435,7 +435,7 @@ export const api = {
   knowledge: {
     documents: (botId: string): Promise<Document[]> =>
       client.get<Document[]>(`bots/${botId}/documents/`),
-    
+
     upload: async (file: File, botId: string): Promise<Document> => {
       const formData = new FormData();
       formData.append('file', file);
@@ -443,40 +443,40 @@ export const api = {
 
       return client.post<Document, FormData>(`bots/${botId}/documents/`, formData, true);
     },
-    
+
     deleteDocument: (id: string): Promise<void> =>
       client.delete<void>(`documents/${id}/`).then(() => undefined),
-    
+
     snippets: async (botId: string): Promise<TextSnippet[]> => {
       // Backend expects bot_id as query parameter
       const response = await client.get<{ results: TextSnippet[] } | TextSnippet[]>(`snippets/?bot_id=${botId}`);
       return getPaginatedResults(response);
     },
-    
+
     saveSnippet: (snippet: SaveSnippetPayload): Promise<TextSnippet> => {
       const isUpdate = !!snippet.id;
       const url = isUpdate ? `snippets/${snippet.id}/` : 'snippets/';
       const method = isUpdate ? client.patch : client.post;
-      
+
       // Extract id and botId separately
       const { id, botId, ...restData } = snippet;
-      
+
       // Build payload: convert botId to bot (UUID) for backend
       const payload: any = {
         ...restData,
         // Convert botId to bot for backend (it expects bot UUID field)
         bot: botId,
       };
-      
+
       // Remove id from payload (it's in URL for updates)
       // Clean up undefined values
       const cleanPayload = Object.fromEntries(
         Object.entries(payload).filter(([_, v]) => v !== undefined)
       );
-      
+
       return method<TextSnippet, typeof cleanPayload>(url, cleanPayload);
     },
-    
+
     deleteSnippet: (id: string): Promise<void> =>
       client.delete<void>(`snippets/${id}/`).then(() => undefined),
   },
@@ -484,17 +484,17 @@ export const api = {
   chat: {
     sessions: (botId: string): Promise<ChatSession[]> =>
       client.get<ChatSession[]>(`bots/${botId}/sessions/`),
-    
+
     messages: (sessionId: string): Promise<ChatMessage[]> =>
       client.get<ChatMessage[]>(`sessions/${sessionId}/messages/`),
-    
+
     transcribeAudio: async (audioFile: File, languageCode?: string): Promise<{ text: string; confidence: number; language_code: string }> => {
       const formData = new FormData();
       formData.append('audio_file', audioFile);
       if (languageCode) {
         formData.append('language_code', languageCode);
       }
-      
+
       // Detect audio format from file extension
       const fileName = audioFile.name.toLowerCase();
       let audioFormat: string | undefined;
@@ -503,24 +503,24 @@ export const api = {
       else if (fileName.endsWith('.flac')) audioFormat = 'flac';
       else if (fileName.endsWith('.webm')) audioFormat = 'webm';
       else if (fileName.endsWith('.ogg')) audioFormat = 'ogg';
-      
+
       if (audioFormat) {
         formData.append('audio_format', audioFormat);
       }
-      
+
       return client.post<{ text: string; confidence: number; language_code: string }, FormData>('chat/transcribe/', formData, true);
     },
-    
+
     processFile: async (file: File, ocrLanguages?: string[]): Promise<{ text: string; pages: number; file_type: string; file_name: string }> => {
       const formData = new FormData();
       formData.append('file', file);
       if (ocrLanguages && ocrLanguages.length > 0) {
         formData.append('ocr_languages', ocrLanguages.join(','));
       }
-      
+
       return client.post<{ text: string; pages: number; file_type: string; file_name: string }, FormData>('chat/process-file/', formData, true);
     },
-    
+
     generateResponse: async (
       botId: string,
       prompt: string,
@@ -537,8 +537,62 @@ export const api = {
         ...(thinkingBudget !== undefined && { thinking_budget: thinkingBudget }),
         ...(temperature !== undefined && { temperature }),
       };
-      
+
       return client.post<{ text: string; groundingChunks?: any[] }, typeof payload>('chat/generate/', payload);
+    },
+  },
+
+  ai: {
+    improveInstruction: async (instruction: string, botId?: string): Promise<{
+      text: string;
+      usage?: { input_tokens: number; output_tokens: number };
+      limit_reached?: boolean;
+      message?: string;
+      error?: string;
+    }> => {
+      return client.post('ai/improve-instruction/', { instruction, bot_id: botId });
+    },
+
+    generateContent: async (title: string, botId?: string): Promise<{
+      text: string;
+      usage?: { input_tokens: number; output_tokens: number };
+      limit_reached?: boolean;
+      message?: string;
+      error?: string;
+    }> => {
+      return client.post('ai/generate-content/', { title, bot_id: botId });
+    },
+
+    getUsageLimits: async (): Promise<{
+      limits: Array<{
+        feature: string;
+        name: string;
+        can_use: boolean;
+        message: string;
+        max_uses?: number;
+        period?: string;
+        is_unlimited?: boolean;
+      }>;
+      plan: string;
+    }> => {
+      return client.get('ai/usage-limits/');
+    },
+
+    getModels: async (): Promise<{
+      models: Array<{
+        id: string;
+        provider: string;
+        provider_display: string;
+        name: string;
+        display_name: string;
+        model_id: string;
+        capability: string;
+        supports_thinking: boolean;
+        supports_vision: boolean;
+        is_default: boolean;
+      }>;
+    }> => {
+      return client.get('ai/models/');
     },
   },
 

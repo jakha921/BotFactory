@@ -25,7 +25,6 @@ import { Tabs } from '../components/ui/Tabs';
 import { Label } from '../components/ui/Label';
 import { Bot as BotType, BotStatus, UIConfig, InlineKeyboardButton } from '../types';
 import { api } from '../services/api';
-import { generateBotResponse } from '../services/geminiService';
 import { validateBot, getFieldErrors } from '../schemas/botSchema';
 import { KeyboardEditor } from '../components/ui/KeyboardEditor';
 import { FormEditor } from '../components/ui/FormEditor';
@@ -55,7 +54,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [isImproving, setIsImproving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  
+
   // Bot status state
   const [botStatus, setBotStatus] = useState<{
     is_running: boolean;
@@ -63,7 +62,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
   } | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
-  
+
   // API Keys State
   const [apiKeys, setApiKeys] = useState<Array<{
     id: string;
@@ -79,7 +78,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
   const [newAPIKeyName, setNewAPIKeyName] = useState('');
   const [newAPIKey, setNewAPIKey] = useState<string | null>(null);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
-  
+
   // UI Config State
   const [uiConfig, setUIConfig] = useState<UIConfig>({
     inline_keyboards: {},
@@ -108,7 +107,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
       setBotStatus(null);
       return;
     }
-    
+
     const loadStatus = async () => {
       try {
         setIsLoadingStatus(true);
@@ -120,16 +119,16 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
         setIsLoadingStatus(false);
       }
     };
-    
+
     // Load immediately
     loadStatus();
-    
+
     // Then reload every 30 seconds
     const interval = setInterval(loadStatus, 30000);
-    
+
     return () => clearInterval(interval);
   }, [botId]);
-  
+
   useEffect(() => {
     if (botId && botId !== 'new') {
       setIsLoading(true);
@@ -187,14 +186,14 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
       setApiKeys([]);
     }
   }, [botId]);
-  
+
   // Load API keys when integrations tab is active
   useEffect(() => {
     if (activeTab === 'integrations' && botId && botId !== 'new') {
       loadAPIKeys();
     }
   }, [activeTab, botId]);
-  
+
   const loadAPIKeys = async () => {
     if (!botId || botId === 'new') return;
     setIsLoadingAPIKeys(true);
@@ -208,7 +207,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
       setIsLoadingAPIKeys(false);
     }
   };
-  
+
   const handleCreateAPIKey = async () => {
     if (!botId || botId === 'new') {
       toast.error('Please save the bot first');
@@ -218,7 +217,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
       toast.error('Please enter a name for the API key');
       return;
     }
-    
+
     setIsCreatingAPIKey(true);
     try {
       const result = await api.bots.createAPIKey(botId, newAPIKeyName);
@@ -233,13 +232,13 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
       setIsCreatingAPIKey(false);
     }
   };
-  
+
   const handleDeleteAPIKey = async (apiKeyId: string) => {
     if (!botId || botId === 'new') return;
     if (!confirm('Are you sure you want to delete this API key? This action cannot be undone.')) {
       return;
     }
-    
+
     try {
       await api.bots.deleteAPIKey(botId, apiKeyId);
       await loadAPIKeys();
@@ -249,7 +248,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
       toast.error(error?.message || 'Failed to delete API key');
     }
   };
-  
+
   const handleCopyAPIKey = (key: string, keyId: string) => {
     navigator.clipboard.writeText(key);
     setCopiedKeyId(keyId);
@@ -269,19 +268,28 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
     if (!formData.systemInstruction) return;
     setIsImproving(true);
     try {
-      const prompt = `Rewrite the following system instructions for an AI bot to be more professional, concise, and robust. Keep the core intent and behavior, but improve clarity and effectiveness: \n\n${formData.systemInstruction}`;
-      const response = await generateBotResponse(
-        'gemini-2.5-flash',
-        prompt,
-        'You are an expert prompt engineer specializing in LLM system instructions.'
+      // Use backend API instead of direct Gemini call
+      const response = await api.ai.improveInstruction(
+        formData.systemInstruction,
+        botId || undefined
       );
+
+      if (response.limit_reached) {
+        toast.error(`AI limit reached: ${response.message}`);
+        return;
+      }
+
       if (response.text) {
         handleChange('systemInstruction', response.text);
         toast.success('System instruction improved successfully');
       }
-    } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : 'Failed to improve instruction';
-      toast.error(errorMessage);
+    } catch (error: any) {
+      if (error?.status === 429) {
+        toast.error(`AI limit reached: ${error.message}`);
+      } else {
+        const errorMessage = error?.message || 'Failed to improve instruction';
+        toast.error(errorMessage);
+      }
     } finally {
       setIsImproving(false);
     }
@@ -292,7 +300,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
       toast.error('Please save the bot first before configuring UI');
       return;
     }
-    
+
     setIsSavingUIConfig(true);
     try {
       await api.bots.updateUIConfig(botId, uiConfig);
@@ -311,26 +319,26 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
       toast.error('Please save the bot first before testing connection');
       return;
     }
-    
+
     if (!formData.telegramToken) {
       toast.error('Please enter a Telegram token first');
       return;
     }
-    
+
     setIsTestingConnection(true);
     try {
       const result = await api.bots.testTelegramConnection(botId);
-      
+
       if (result.success && result.bot_info) {
         let message = `Connection successful! Bot: @${result.bot_info.username} (${result.bot_info.first_name})`;
-        
+
         console.log('[BotSettings] Connection test result:', {
           has_telegram_id: result.has_telegram_id,
           notification_sent: result.notification_sent,
           notification_error: result.notification_error,
           telegram_id: result.telegram_id,
         });
-        
+
         // Check if notification was sent or if user needs to add telegram_id
         if (result.has_telegram_id) {
           if (result.notification_sent) {
@@ -359,7 +367,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
             );
           }, 1000);
         }
-        
+
         console.log('[BotSettings] Telegram connection test successful:', result.bot_info);
       } else {
         toast.error(`Connection failed: ${result.error || 'Unknown error'}`);
@@ -373,13 +381,13 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
       setIsTestingConnection(false);
     }
   };
-  
+
   const handleRestartBot = async () => {
     if (!botId || botId === 'new') {
       toast.error('Please save the bot first before restarting');
       return;
     }
-    
+
     setIsRestarting(true);
     try {
       const result = await api.bots.restartBot(botId);
@@ -428,16 +436,16 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
       const botData: any = {
         ...validation.data,
       };
-      
+
       // Only include id for updates
       if (botId && botId !== 'new') {
         botData.id = botId;
       }
-      
+
       await api.bots.save(botData);
       toast.success(botId === 'new' ? 'Bot created successfully' : 'Bot updated successfully');
       console.log('[BotSettings] Bot saved, calling onBack');
-      
+
       // Update store to refresh bot list for BotSelector
       try {
         const updatedBots = await api.bots.list();
@@ -446,7 +454,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
       } catch (e) {
         console.error('[BotSettings] Failed to refresh bot list:', e);
       }
-      
+
       onBack();
     } catch (error: any) {
       console.error('[BotSettings] Save error:', error);
@@ -783,245 +791,244 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
         {/* INTEGRATIONS TAB */}
         {activeTab === 'integrations' && (
           <div className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-300">
-          <Card className="border-black/5 dark:border-white/5">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Webhook className="w-5 h-5 text-blue-500" />
-                Telegram Integration
-              </CardTitle>
-              <CardDescription>Connect your bot to Telegram.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                <h4 className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-2">
-                  How to get a token?
-                </h4>
-                <ol className="list-decimal list-inside text-sm text-blue-700 dark:text-blue-400 space-y-1">
-                  <li>Open @BotFather in Telegram</li>
-                  <li>Send command /newbot</li>
-                  <li>Follow instructions to name your bot</li>
-                  <li>Copy the API Token provided</li>
-                </ol>
-              </div>
+            <Card className="border-black/5 dark:border-white/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Webhook className="w-5 h-5 text-blue-500" />
+                  Telegram Integration
+                </CardTitle>
+                <CardDescription>Connect your bot to Telegram.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                  <h4 className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-2">
+                    How to get a token?
+                  </h4>
+                  <ol className="list-decimal list-inside text-sm text-blue-700 dark:text-blue-400 space-y-1">
+                    <li>Open @BotFather in Telegram</li>
+                    <li>Send command /newbot</li>
+                    <li>Follow instructions to name your bot</li>
+                    <li>Copy the API Token provided</li>
+                  </ol>
+                </div>
 
-              <Input
-                label="Bot Token"
-                type="password"
-                placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
-                value={formData.telegramToken}
-                onChange={(e) => handleChange('telegramToken', e.target.value)}
-                helperText="We encrypt this token securely."
-              />
+                <Input
+                  label="Bot Token"
+                  type="password"
+                  placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+                  value={formData.telegramToken}
+                  onChange={(e) => handleChange('telegramToken', e.target.value)}
+                  helperText="We encrypt this token securely."
+                />
 
-              {/* Bot Status Section */}
-              {botId && botId !== 'new' && (
-                <div className="space-y-4 pt-4 border-t border-black/5 dark:border-white/5">
-                  <div>
-                    <Label className="text-sm font-medium mb-2 block">Bot Status</Label>
-                    {isLoadingStatus ? (
-                      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Loading status...
-                      </div>
-                    ) : botStatus ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className={`w-2 h-2 rounded-full ${
-                              botStatus.is_running
+                {/* Bot Status Section */}
+                {botId && botId !== 'new' && (
+                  <div className="space-y-4 pt-4 border-t border-black/5 dark:border-white/5">
+                    <div>
+                      <Label className="text-sm font-medium mb-2 block">Bot Status</Label>
+                      {isLoadingStatus ? (
+                        <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Loading status...
+                        </div>
+                      ) : botStatus ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className={`w-2 h-2 rounded-full ${botStatus.is_running
                                 ? 'bg-green-500 animate-pulse'
                                 : 'bg-gray-400'
-                            }`}
-                          />
-                          <span className="text-sm font-medium">
-                            {botStatus.is_running ? 'Running' : 'Stopped'}
-                          </span>
+                                }`}
+                            />
+                            <span className="text-sm font-medium">
+                              {botStatus.is_running ? 'Running' : 'Stopped'}
+                            </span>
+                          </div>
+                          {botStatus.last_heartbeat && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              Last activity: {new Date(botStatus.last_heartbeat).toLocaleString()}
+                            </p>
+                          )}
                         </div>
-                        {botStatus.last_heartbeat && (
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            Last activity: {new Date(botStatus.last_heartbeat).toLocaleString()}
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Status unavailable
-                      </p>
-                    )}
-                  </div>
+                      ) : (
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          Status unavailable
+                        </p>
+                      )}
+                    </div>
 
-                  <div className="flex gap-2 flex-wrap">
-                    <Button 
-                      variant="secondary" 
-                      className="flex-1 sm:flex-none"
+                    <div className="flex gap-2 flex-wrap">
+                      <Button
+                        variant="secondary"
+                        className="flex-1 sm:flex-none"
+                        onClick={handleTestTelegramConnection}
+                        isLoading={isTestingConnection}
+                        disabled={isTestingConnection || !formData.telegramToken}
+                      >
+                        {isTestingConnection ? 'Testing...' : 'Test Connection'}
+                      </Button>
+                      {formData.status === BotStatus.ACTIVE && botStatus?.is_running && (
+                        <Button
+                          variant="secondary"
+                          className="flex-1 sm:flex-none"
+                          onClick={handleRestartBot}
+                          isLoading={isRestarting}
+                          disabled={isRestarting || !botId || botId === 'new'}
+                        >
+                          {isRestarting ? 'Restarting...' : 'Restart Bot'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {(!botId || botId === 'new') && (
+                  <div className="pt-4">
+                    <Button
+                      variant="secondary"
+                      className="w-full sm:w-auto"
                       onClick={handleTestTelegramConnection}
                       isLoading={isTestingConnection}
                       disabled={isTestingConnection || !formData.telegramToken}
                     >
                       {isTestingConnection ? 'Testing...' : 'Test Connection'}
                     </Button>
-                    {formData.status === BotStatus.ACTIVE && botStatus?.is_running && (
-                      <Button 
-                        variant="secondary" 
-                        className="flex-1 sm:flex-none"
-                        onClick={handleRestartBot}
-                        isLoading={isRestarting}
-                        disabled={isRestarting || !botId || botId === 'new'}
-                      >
-                        {isRestarting ? 'Restarting...' : 'Restart Bot'}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {(!botId || botId === 'new') && (
-                <div className="pt-4">
-                  <Button 
-                    variant="secondary" 
-                    className="w-full sm:w-auto"
-                    onClick={handleTestTelegramConnection}
-                    isLoading={isTestingConnection}
-                    disabled={isTestingConnection || !formData.telegramToken}
-                  >
-                    {isTestingConnection ? 'Testing...' : 'Test Connection'}
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-          
-          {/* Public API Keys Section */}
-          {botId && botId !== 'new' && (
-            <Card className="border-black/5 dark:border-white/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Key className="w-5 h-5 text-purple-500" />
-                  Public API Keys
-                </CardTitle>
-                <CardDescription>
-                  Create API keys for external services to access this bot.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* New API Key Creation */}
-                {newAPIKey && (
-                  <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 space-y-3">
-                    <div className="flex items-center gap-2">
-                      <Check className="w-5 h-5 text-green-600 dark:text-green-400" />
-                      <h4 className="font-medium text-green-800 dark:text-green-300">
-                        API Key Created Successfully!
-                      </h4>
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-sm text-green-700 dark:text-green-400">
-                        Save this key securely. It will not be shown again.
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <code className="flex-1 px-3 py-2 bg-white dark:bg-gray-800 border border-green-300 dark:border-green-700 rounded text-sm font-mono break-all">
-                          {newAPIKey}
-                        </code>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          icon={copiedKeyId === 'new' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                          onClick={() => handleCopyAPIKey(newAPIKey, 'new')}
-                        >
-                          Copy
-                        </Button>
-                      </div>
-                    </div>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setNewAPIKey(null)}
-                    >
-                      Close
-                    </Button>
                   </div>
                 )}
-                
-                {/* Create New Key Form */}
-                {!newAPIKey && (
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="API Key Name (e.g., Production, Development)"
-                      value={newAPIKeyName}
-                      onChange={(e) => setNewAPIKeyName(e.target.value)}
-                      className="flex-1"
-                    />
-                    <Button
-                      onClick={handleCreateAPIKey}
-                      isLoading={isCreatingAPIKey}
-                      disabled={!newAPIKeyName.trim() || isCreatingAPIKey}
-                      icon={<Plus className="w-4 h-4" />}
-                    >
-                      Create Key
-                    </Button>
-                  </div>
-                )}
-                
-                {/* API Keys List */}
-                {isLoadingAPIKeys ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
-                  </div>
-                ) : apiKeys.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                    <Key className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                    <p>No API keys created yet</p>
-                    <p className="text-sm mt-1">Create one to allow external services to access this bot</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {apiKeys.map((key) => (
-                      <div
-                        key={key.id}
-                        className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900/50 border border-black/5 dark:border-white/5 rounded-lg"
-                      >
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{key.name}</span>
-                            {key.is_active ? (
-                              <span className="px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">
-                                Active
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded">
-                                Inactive
-                              </span>
-                            )}
-                          </div>
-                          <div className="mt-1 flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-                            <code className="font-mono">{key.key_prefix}...</code>
-                            <span>Created: {new Date(key.created_at).toLocaleDateString()}</span>
-                            {key.last_used_at && (
-                              <span>Last used: {new Date(key.last_used_at).toLocaleDateString()}</span>
-                            )}
-                          </div>
-                        </div>
-                        <Button
-                          variant="icon"
-                          size="sm"
-                          onClick={() => handleDeleteAPIKey(key.id)}
-                          className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                {/* API Usage Info */}
-                <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                  <p className="text-sm text-blue-700 dark:text-blue-400">
-                    <strong>Usage:</strong> Include the API key in the <code className="px-1 py-0.5 bg-blue-100 dark:bg-blue-900/30 rounded">X-API-Key</code> header when making requests to <code className="px-1 py-0.5 bg-blue-100 dark:bg-blue-900/30 rounded">/api/v1/public/chat/</code>
-                  </p>
-                </div>
               </CardContent>
             </Card>
-          )}
+
+            {/* Public API Keys Section */}
+            {botId && botId !== 'new' && (
+              <Card className="border-black/5 dark:border-white/5">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Key className="w-5 h-5 text-purple-500" />
+                    Public API Keys
+                  </CardTitle>
+                  <CardDescription>
+                    Create API keys for external services to access this bot.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* New API Key Creation */}
+                  {newAPIKey && (
+                    <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Check className="w-5 h-5 text-green-600 dark:text-green-400" />
+                        <h4 className="font-medium text-green-800 dark:text-green-300">
+                          API Key Created Successfully!
+                        </h4>
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-sm text-green-700 dark:text-green-400">
+                          Save this key securely. It will not be shown again.
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <code className="flex-1 px-3 py-2 bg-white dark:bg-gray-800 border border-green-300 dark:border-green-700 rounded text-sm font-mono break-all">
+                            {newAPIKey}
+                          </code>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={copiedKeyId === 'new' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                            onClick={() => handleCopyAPIKey(newAPIKey, 'new')}
+                          >
+                            Copy
+                          </Button>
+                        </div>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setNewAPIKey(null)}
+                      >
+                        Close
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Create New Key Form */}
+                  {!newAPIKey && (
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="API Key Name (e.g., Production, Development)"
+                        value={newAPIKeyName}
+                        onChange={(e) => setNewAPIKeyName(e.target.value)}
+                        className="flex-1"
+                      />
+                      <Button
+                        onClick={handleCreateAPIKey}
+                        isLoading={isCreatingAPIKey}
+                        disabled={!newAPIKeyName.trim() || isCreatingAPIKey}
+                        icon={<Plus className="w-4 h-4" />}
+                      >
+                        Create Key
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* API Keys List */}
+                  {isLoadingAPIKeys ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+                    </div>
+                  ) : apiKeys.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                      <Key className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                      <p>No API keys created yet</p>
+                      <p className="text-sm mt-1">Create one to allow external services to access this bot</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {apiKeys.map((key) => (
+                        <div
+                          key={key.id}
+                          className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900/50 border border-black/5 dark:border-white/5 rounded-lg"
+                        >
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{key.name}</span>
+                              {key.is_active ? (
+                                <span className="px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">
+                                  Active
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded">
+                                  Inactive
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-1 flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                              <code className="font-mono">{key.key_prefix}...</code>
+                              <span>Created: {new Date(key.created_at).toLocaleDateString()}</span>
+                              {key.last_used_at && (
+                                <span>Last used: {new Date(key.last_used_at).toLocaleDateString()}</span>
+                              )}
+                            </div>
+                          </div>
+                          <Button
+                            variant="icon"
+                            size="sm"
+                            onClick={() => handleDeleteAPIKey(key.id)}
+                            className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* API Usage Info */}
+                  <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                    <p className="text-sm text-blue-700 dark:text-blue-400">
+                      <strong>Usage:</strong> Include the API key in the <code className="px-1 py-0.5 bg-blue-100 dark:bg-blue-900/30 rounded">X-API-Key</code> header when making requests to <code className="px-1 py-0.5 bg-blue-100 dark:bg-blue-900/30 rounded">/api/v1/public/chat/</code>
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
       </div>

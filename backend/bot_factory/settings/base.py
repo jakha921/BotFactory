@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     'apps.telegram',  # Must be before chat (chat references TelegramUser)
     'apps.chat',
     'apps.analytics',
+    'apps.ai_settings',  # AI settings and usage limits
 ]
 
 MIDDLEWARE = [

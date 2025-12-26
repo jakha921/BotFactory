@@ -24,7 +24,6 @@ import { Label } from '../components/ui/Label';
 import { Document, TextSnippet } from '../types';
 import { api } from '../services/api';
 import { toast } from 'sonner';
-import { generateBotResponse } from '../services/geminiService';
 import { cn, formatDate } from '../utils';
 import { useAppStore } from '../store/useAppStore';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -191,7 +190,7 @@ export const ManageKnowledge: React.FC = () => {
       toast.error('Please fill in title and content');
       return;
     }
-    
+
     setIsSaving(true);
     try {
       // Process tags: ensure it's an array
@@ -207,7 +206,7 @@ export const ManageKnowledge: React.FC = () => {
             .filter(Boolean);
         }
       }
-      
+
       const snippetData = {
         title: editingSnippet.title.trim(),
         content: editingSnippet.content.trim(),
@@ -215,10 +214,10 @@ export const ManageKnowledge: React.FC = () => {
         botId: selectedBotId,
         ...(editingSnippet.id && { id: editingSnippet.id }),
       };
-      
+
       console.log('[ManageKnowledge] Saving snippet:', snippetData);
       const saved = await api.knowledge.saveSnippet(snippetData);
-      
+
       if (editingSnippet.id) {
         setSnippets((prev) => prev.map((s) => (s.id === saved.id ? saved : s)));
         toast.success('Snippet updated successfully');
@@ -256,19 +255,28 @@ export const ManageKnowledge: React.FC = () => {
     }
     setIsGenerating(true);
     try {
-      const prompt = `Generate comprehensive content about: ${editingSnippet.title}. Make it informative, well-structured, and suitable for a knowledge base.`;
-      const response = await generateBotResponse(
-        'gemini-2.5-flash',
-        prompt,
-        'You are a helpful content generator that creates informative, structured text for knowledge bases.'
+      // Use backend API instead of direct Gemini call
+      const response = await api.ai.generateContent(
+        editingSnippet.title,
+        selectedBotId || undefined
       );
+
+      if (response.limit_reached) {
+        toast.error(`AI limit reached: ${response.message}`);
+        return;
+      }
+
       if (response.text) {
         setEditingSnippet((prev) => ({ ...prev, content: response.text }));
         toast.success('Content generated successfully');
       }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to generate content';
-      toast.error(errorMessage);
+    } catch (error: any) {
+      if (error?.status === 429) {
+        toast.error(`AI limit reached: ${error.message}`);
+      } else {
+        const errorMessage = error?.message || 'Failed to generate content';
+        toast.error(errorMessage);
+      }
     } finally {
       setIsGenerating(false);
     }
