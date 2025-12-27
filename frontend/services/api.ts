@@ -596,6 +596,39 @@ export const api = {
     },
   },
 
+  userApiKeys: {
+    list: (): Promise<Array<{
+      id: string;
+      name: string;
+      provider: string;
+      key: string;
+      created: string;
+    }>> => client.get<Array<{
+      id: string;
+      name: string;
+      provider: string;
+      key: string;
+      created: string;
+    }>>('auth/api-keys/'),
+
+    create: (name: string, provider: string, key: string): Promise<{
+      id: string;
+      name: string;
+      provider: string;
+      key: string;
+      created: string;
+    }> => client.post<{
+      id: string;
+      name: string;
+      provider: string;
+      key: string;
+      created: string;
+    }>('auth/api-keys/', { name, provider, key }),
+
+    delete: (id: string): Promise<void> =>
+      client.delete<void>(`auth/api-keys/${id}/`).then(() => undefined),
+  },
+
   subscription: {
     usage: (): Promise<unknown> =>
       client.get<unknown>('subscription/'),

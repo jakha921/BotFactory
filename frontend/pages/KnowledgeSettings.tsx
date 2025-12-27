@@ -4,15 +4,10 @@ import { toast } from 'sonner';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { api } from '../services/api';
+import { Document } from '../types';
 
 interface KnowledgeSettingsProps {
   botId: string;
-}
-
-interface Document {
-  id: string;
-  file: string;
-  uploaded_at: string;
 }
 
 export const KnowledgeSettings: React.FC<KnowledgeSettingsProps> = ({ botId }) => {
@@ -24,7 +19,7 @@ export const KnowledgeSettings: React.FC<KnowledgeSettingsProps> = ({ botId }) =
   const fetchDocuments = async () => {
     setIsLoading(true);
     try {
-      const docs = await api.bots.getDocuments(botId);
+      const docs = await api.knowledge.documents(botId);
       setDocuments(docs);
     } catch (error) {
       console.error('Failed to fetch documents:', error);
@@ -52,7 +47,7 @@ export const KnowledgeSettings: React.FC<KnowledgeSettingsProps> = ({ botId }) =
 
     setIsUploading(true);
     try {
-      await api.bots.uploadDocument(botId, file);
+      await api.knowledge.upload(file, botId);
       toast.success('Document uploaded successfully.');
       setFile(null);
       fetchDocuments(); // Refresh the list
@@ -96,7 +91,7 @@ export const KnowledgeSettings: React.FC<KnowledgeSettingsProps> = ({ botId }) =
               {documents.map((doc) => (
                 <li key={doc.id} className="flex items-center gap-2 p-2 bg-gray-100 dark:bg-gray-800 rounded-lg">
                   <File className="w-4 h-4" />
-                  <span>{doc.file}</span>
+                  <span>{doc.name}</span>
                 </li>
               ))}
             </ul>

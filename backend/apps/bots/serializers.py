@@ -46,6 +46,15 @@ class BotSerializer(serializers.ModelSerializer):
     
     def to_representation(self, instance):
         """Customize representation to match frontend types (camelCase)."""
+        # Mask telegram token for security - only show last 8 characters
+        masked_token = ''
+        if instance.telegram_token:
+            decrypted = instance.decrypted_telegram_token
+            if decrypted and len(decrypted) > 8:
+                masked_token = '****' + decrypted[-8:]
+            elif decrypted:
+                masked_token = '****'
+        
         representation = {
             'id': str(instance.id),
             'name': instance.name,
@@ -56,10 +65,12 @@ class BotSerializer(serializers.ModelSerializer):
             'temperature': instance.temperature,
             'systemInstruction': instance.system_instruction,
             'thinkingBudget': instance.thinking_budget,
-            # Return decrypted token so it matches frontend regex and can be edited
-            'telegramToken': instance.decrypted_telegram_token if instance.telegram_token else '',
+            # Return masked token for security
+            'telegramToken': masked_token,
+            'hasTelegramToken': bool(instance.telegram_token),
             'avatar': instance.avatar if instance.avatar else '',
             'createdAt': instance.created_at.isoformat() if instance.created_at else None,
+            'updatedAt': instance.updated_at.isoformat() if instance.updated_at else None,
             'conversationsCount': instance.conversations_count,
             'documentsCount': instance.documents_count,
             'uiConfig': instance.ui_config if instance.ui_config else {},

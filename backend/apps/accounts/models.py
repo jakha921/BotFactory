@@ -6,6 +6,8 @@ import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.utils import timezone
+from cryptography.fernet import Fernet
+from django.conf import settings
 
 
 class UserManager(BaseUserManager):
@@ -123,3 +125,65 @@ class User(AbstractBaseUser, PermissionsMixin):
     def is_enterprise_plan(self):
         """Check if user is on Enterprise plan."""
         return self.plan == 'Enterprise'
+
+
+class UserAPIKey(models.Model):
+    """
+    User API Keys for AI providers (OpenAI, Gemini, Anthropic).
+    Keys are encrypted at rest for security.
+    """
+    
+    PROVIDER_CHOICES = [
+        ('openai', 'OpenAI'),
+        ('gemini', 'Google Gemini'),
+        ('anthropic', 'Anthropic'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='api_keys')
+    name = models.CharField(max_length=100)
+    provider = models.CharField(max_length=50, choices=PROVIDER_CHOICES)
+    encrypted_key = models.CharField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name = 'User API Key'
+        verbose_name_plural = 'User API Keys'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'provider']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.email} - {self.name}"
+    
+    def encrypt_key(self, plain_key: str) -> None:
+        """Encrypt and store the API key."""
+        try:
+            fernet_key = settings.ENCRYPTION_KEY.encode()
+            f = Fernet(fernet_key)
+            self.encrypted_key = f.encrypt(plain_key.encode()).decode()
+        except Exception as e:
+            raise ValueError(f"Failed to encrypt API key: {str(e)}")
+    
+    def decrypt_key(self) -> str:
+        """Decrypt and return the API key."""
+        try:
+            if not self.encrypted_key:
+                return ""
+            fernet_key = settings.ENCRYPTION_KEY.encode()
+            f = Fernet(fernet_key)
+            return f.decrypt(self.encrypted_key.encode()).decode()
+        except Exception as e:
+            raise ValueError(f"Failed to decrypt API key: {str(e)}")
+    
+    @property
+    def masked_key(self) -> str:
+        """Return a masked version of the key for display."""
+        try:
+            decrypted = self.decrypt_key()
+            if len(decrypted) <= 8:
+                return '****'
+            return f"{decrypted[:3]}...{decrypted[-4:]}"
+        except:
+            return '****'

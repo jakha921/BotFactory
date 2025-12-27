@@ -16,6 +16,4 @@ urlpatterns = [
     path('', include(router.urls)),
     # Update status endpoint (using detail action)
     path('users/<uuid:pk>/status/', TelegramUserViewSet.as_view({'post': 'update_status'}), name='user-status'),
-    # Webhook endpoint - uses bot UUID instead of token for security
-    path('webhook/<uuid:bot_id>/', TelegramWebhookView.as_view(), name='telegram-webhook'),
 ]

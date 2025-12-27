@@ -20,8 +20,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../co
 import { Switch } from '../components/ui/Switch';
 import { Label } from '../components/ui/Label';
 import { useThemeStore } from '../store/useThemeStore';
-import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
+import { api } from '../services/api';
 import { cn } from '../utils';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -30,7 +30,6 @@ type SettingsTab = 'profile' | 'api_keys' | 'security' | 'notifications';
 export const Settings: React.FC = () => {
   console.log('[Settings] Component rendered');
   const { theme, setTheme } = useThemeStore();
-  const { apiKeys, addApiKey, deleteApiKey } = useAppStore();
   const { user, updateUser } = useAuthStore();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
@@ -51,9 +50,18 @@ export const Settings: React.FC = () => {
     weeklyDigest: true,
   });
 
-  // API Key Form State
+  // API Key State
+  const [apiKeys, setApiKeys] = useState<Array<{
+    id: string;
+    name: string;
+    provider: string;
+    key: string;
+    created: string;
+  }>>([]);
+  const [isLoadingKeys, setIsLoadingKeys] = useState(false);
   const [newKeyName, setNewKeyName] = useState('');
   const [newKeyValue, setNewKeyValue] = useState('');
+  const [newKeyProvider, setNewKeyProvider] = useState<'openai' | 'gemini' | 'anthropic'>('gemini');
   const [isAddingKey, setIsAddingKey] = useState(false);
 
   // Security State
@@ -71,6 +79,26 @@ export const Settings: React.FC = () => {
       });
     }
   }, [user]);
+
+  // Load API keys when tab changes
+  useEffect(() => {
+    if (activeTab === 'api_keys') {
+      loadAPIKeys();
+    }
+  }, [activeTab]);
+
+  const loadAPIKeys = async () => {
+    setIsLoadingKeys(true);
+    try {
+      const keys = await api.userApiKeys.list();
+      setApiKeys(keys);
+    } catch (error: any) {
+      console.error('[Settings] Failed to load API keys:', error);
+      toast.error('Failed to load API keys');
+    } finally {
+      setIsLoadingKeys(false);
+    }
+  };
 
   const handleSave = async () => {
     setIsLoading(true);
@@ -112,26 +140,32 @@ export const Settings: React.FC = () => {
     setTimeout(() => el.remove(), 2000);
   };
 
-  const handleDeleteKey = (id: string) => {
+  const handleDeleteKey = async (id: string) => {
     if (confirm('Are you sure? This action cannot be undone.')) {
-      deleteApiKey(id);
+      try {
+        await api.userApiKeys.delete(id);
+        setApiKeys(keys => keys.filter(k => k.id !== id));
+        toast.success('API key deleted successfully');
+      } catch (error: any) {
+        toast.error('Failed to delete API key');
+      }
     }
   };
 
-  const handleCreateKey = () => {
+  const handleCreateKey = async () => {
     if (!newKeyName || !newKeyValue) return;
 
-    const newKey = {
-      id: Date.now().toString(),
-      name: newKeyName,
-      key: newKeyValue,
-      provider: 'openai' as const, // Default or add selector
-      created: new Date().toLocaleDateString('en-CA'),
-    };
-    addApiKey(newKey);
-    setNewKeyName('');
-    setNewKeyValue('');
-    setIsAddingKey(false);
+    try {
+      const newKey = await api.userApiKeys.create(newKeyName, newKeyProvider, newKeyValue);
+      setApiKeys(keys => [...keys, newKey]);
+      setNewKeyName('');
+      setNewKeyValue('');
+      setNewKeyProvider('gemini');
+      setIsAddingKey(false);
+      toast.success('API key created successfully');
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to create API key');
+    }
   };
 
   const maskKey = (key: string) => {

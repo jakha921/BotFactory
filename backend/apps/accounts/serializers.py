@@ -3,7 +3,7 @@ Serializers for accounts app.
 """
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
-from apps.accounts.models import User
+from apps.accounts.models import User, UserAPIKey
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -147,3 +147,49 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         
         return instance
 
+
+class UserAPIKeySerializer(serializers.ModelSerializer):
+    """Serializer for listing user API keys (without exposing the actual key)."""
+    
+    class Meta:
+        model = UserAPIKey
+        fields = ['id', 'name', 'provider', 'created_at']
+        read_only_fields = ['id', 'created_at']
+    
+    def to_representation(self, instance):
+        """Return camelCase representation."""
+        return {
+            'id': str(instance.id),
+            'name': instance.name,
+            'provider': instance.provider,
+            'key': instance.masked_key,  # Masked version
+            'created': instance.created_at.strftime('%Y-%m-%d'),
+        }
+
+
+class UserAPIKeyCreateSerializer(serializers.Serializer):
+    """Serializer for creating a new user API key."""
+    name = serializers.CharField(max_length=100, required=True)
+    provider = serializers.ChoiceField(choices=['openai', 'gemini', 'anthropic'], required=True)
+    key = serializers.CharField(required=True, write_only=True)
+    
+    def validate_key(self, value):
+        """Validate that key is not empty."""
+        if not value or not value.strip():
+            raise serializers.ValidationError("API key cannot be empty")
+        return value.strip()
+    
+    def create(self, validated_data):
+        """Create a new encrypted API key for the user."""
+        user = self.context['request'].user
+        plain_key = validated_data.pop('key')
+        
+        api_key = UserAPIKey(
+            user=user,
+            name=validated_data['name'],
+            provider=validated_data['provider']
+        )
+        api_key.encrypt_key(plain_key)
+        api_key.save()
+        
+        return api_key

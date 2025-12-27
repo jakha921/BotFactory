@@ -19,10 +19,13 @@ from apps.accounts.serializers import (
     UserSerializer,
     UserRegisterSerializer,
     UserUpdateSerializer,
+    UserAPIKeySerializer,
+    UserAPIKeyCreateSerializer,
 )
 from rest_framework.exceptions import AuthenticationFailed, ValidationError as DRFValidationError, Throttled
 from apps.bots.models import Bot
 from apps.knowledge.models import Document
+from apps.accounts.models import UserAPIKey
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -293,3 +296,42 @@ def subscription_usage_view(request):
     }
     
     return Response(response_data, status=status.HTTP_200_OK)
+
+
+class UserAPIKeyViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing user API keys.
+    
+    list: GET /api/v1/auth/api-keys/ - List all user API keys
+    create: POST /api/v1/auth/api-keys/ - Create a new API key
+    destroy: DELETE /api/v1/auth/api-keys/{id}/ - Delete an API key
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        """Return only the current user's API keys."""
+        return UserAPIKey.objects.filter(user=self.request.user)
+    
+    def get_serializer_class(self):
+        """Use different serializers for create vs list."""
+        if self.action == 'create':
+            return UserAPIKeyCreateSerializer
+        return UserAPIKeySerializer
+    
+    def create(self, request, *args, **kwargs):
+        """Create a new encrypted API key."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        api_key = serializer.save()
+        
+        # Return the full representation using UserAPIKeySerializer
+        return Response(
+            UserAPIKeySerializer(api_key).data,
+            status=status.HTTP_201_CREATED
+        )
+    
+    def destroy(self, request, *args, **kwargs):
+        """Delete an API key."""
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)

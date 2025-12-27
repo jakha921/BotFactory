@@ -79,7 +79,8 @@ class DocumentChunkViewSet(viewsets.ModelViewSet):
     
     list: GET /api/v1/documents/{document_id}/chunks/ - List chunks for a document
     """
-    permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
+    permission_classes = [IsAuthenticated]  # DocumentChunk doesn't have owner field
+
     serializer_class = DocumentChunkSerializer
     
     def get_queryset(self):

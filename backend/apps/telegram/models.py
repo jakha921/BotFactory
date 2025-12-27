@@ -33,7 +33,7 @@ class TelegramUser(models.Model):
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    telegram_id = models.BigIntegerField(unique=True)
+    telegram_id = models.BigIntegerField(db_index=True)  # Unique per bot, not globally
     bot = models.ForeignKey(
         'bots.Bot',
         on_delete=models.CASCADE,

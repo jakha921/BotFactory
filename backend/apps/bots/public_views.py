@@ -5,7 +5,7 @@ Uses API key authentication instead of JWT.
 import logging
 from rest_framework import views, status
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.core.cache import cache
 from django.utils import timezone
 
@@ -69,7 +69,7 @@ class PublicChatView(views.APIView):
     }
     """
     authentication_classes = [APIKeyAuthentication]
-    permission_classes = [AllowAny]  # Authentication is handled by APIKeyAuthentication
+    permission_classes = [IsAuthenticated]  # Require valid API key authentication
     
     @rate_limit_api_key('public_api', limit=100, period=60)  # 100 requests per minute per API key
     def post(self, request):

@@ -282,9 +282,9 @@ export const Monitoring: React.FC = () => {
                     ? 'bg-white dark:bg-white/5 shadow-sm border-black/5 dark:border-white/5'
                     : 'hover:bg-gray-50 dark:hover:bg-white/5',
                   monitoringUserId &&
-                    session.userId === monitoringUserId &&
-                    selectedSessionId !== session.id &&
-                    'bg-blue-50 dark:bg-blue-900/10'
+                  session.userId === monitoringUserId &&
+                  selectedSessionId !== session.id &&
+                  'bg-blue-50 dark:bg-blue-900/10'
                 )}
               >
                 <div className="flex justify-between items-start mb-1">
@@ -398,11 +398,11 @@ export const Monitoring: React.FC = () => {
                         msg.role === 'user'
                           ? 'bg-primary text-white border-primary rounded-tr-none'
                           : cn(
-                              'bg-white dark:bg-gray-800 rounded-tl-none',
-                              msg.isFlagged
-                                ? 'border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/10'
-                                : 'border-black/5 dark:border-white/5'
-                            )
+                            'bg-white dark:bg-gray-800 rounded-tl-none',
+                            msg.isFlagged
+                              ? 'border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/10'
+                              : 'border-black/5 dark:border-white/5'
+                          )
                       )}
                     >
                       {msg.content}
@@ -511,9 +511,20 @@ export const Monitoring: React.FC = () => {
                   Cancel
                 </Button>
                 <Button
-                  onClick={() => {
-                    // Mock apply
-                    setIsImproveModalOpen(false);
+                  onClick={async () => {
+                    try {
+                      const currentBot = getSelectedBot();
+                      if (currentBot) {
+                        await api.bots.save({
+                          ...currentBot,
+                          systemInstruction: improvementText
+                        });
+                        toast.success('Bot instruction updated successfully');
+                      }
+                      setIsImproveModalOpen(false);
+                    } catch (error: any) {
+                      toast.error(error?.message || 'Failed to update instruction');
+                    }
                   }}
                 >
                   Apply Updates
