@@ -14,16 +14,16 @@ import { Button } from '../components/ui/Button';
 import { Skeleton } from '../components/ui/Skeleton';
 import { cn, formatNumber } from '../utils';
 import { api } from '../services/api';
-import { KPI } from '../types';
+import { DashboardStats, ChartDataPoint, ActivityItem } from '../types';
 import { useThemeStore } from '../store/useThemeStore';
 import { AnimatePresence, motion } from 'framer-motion';
 
 export const Dashboard: React.FC = () => {
   console.log('[Dashboard] Component rendered');
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState<KPI[]>([]);
-  const [chartData, setChartData] = useState<any[]>([]);
-  const [activity, setActivity] = useState<any[]>([]);
+  const [stats, setStats] = useState<DashboardStats[]>([]);
+  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [timeRange, setTimeRange] = useState('Last 7 days');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const { theme } = useThemeStore();
@@ -133,60 +133,60 @@ export const Dashboard: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {loading
           ? // Skeleton Loader
-            [1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-32" variant="default" />)
+          [1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-32" variant="default" />)
           : stats.map((stat, index) => {
-              const Icon = stat.icon;
-              const isPositive =
-                (stat.trendDirection === 'up' && stat.title !== 'Avg. Response Time') ||
-                (stat.trendDirection === 'down' && stat.title === 'Avg. Response Time');
+            const Icon = stat.icon;
+            const isPositive =
+              (stat.trendDirection === 'up' && stat.title !== 'Avg. Response Time') ||
+              (stat.trendDirection === 'down' && stat.title === 'Avg. Response Time');
 
-              return (
-                <Card
-                  key={index}
-                  className="relative overflow-hidden group border-black/5 dark:border-white/5"
-                >
-                  <CardContent className="p-6 relative z-10">
-                    <div className="flex justify-between items-start mb-4">
-                      <div
-                        className={cn(
-                          'p-2.5 rounded-xl transition-colors duration-300',
-                          'bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-300 group-hover:text-white',
-                          stat.color === 'blue' && 'group-hover:bg-blue-500',
-                          stat.color === 'indigo' && 'group-hover:bg-indigo-500',
-                          stat.color === 'amber' && 'group-hover:bg-amber-500',
-                          stat.color === 'green' && 'group-hover:bg-emerald-500'
-                        )}
-                      >
-                        <Icon className="w-5 h-5" />
-                      </div>
-                      <div
-                        className={cn(
-                          'flex items-center text-xs font-semibold rounded-full px-2 py-1 border',
-                          isPositive
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20'
-                            : 'bg-red-50 text-red-700 border-red-100 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20'
-                        )}
-                      >
-                        {stat.trendDirection === 'up' ? (
-                          <ArrowUpRight className="w-3 h-3 mr-1" />
-                        ) : (
-                          <ArrowDownRight className="w-3 h-3 mr-1" />
-                        )}
-                        {stat.trend}%
-                      </div>
+            return (
+              <Card
+                key={index}
+                className="relative overflow-hidden group border-black/5 dark:border-white/5"
+              >
+                <CardContent className="p-6 relative z-10">
+                  <div className="flex justify-between items-start mb-4">
+                    <div
+                      className={cn(
+                        'p-2.5 rounded-xl transition-colors duration-300',
+                        'bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-300 group-hover:text-white',
+                        stat.color === 'blue' && 'group-hover:bg-blue-500',
+                        stat.color === 'indigo' && 'group-hover:bg-indigo-500',
+                        stat.color === 'amber' && 'group-hover:bg-amber-500',
+                        stat.color === 'green' && 'group-hover:bg-emerald-500'
+                      )}
+                    >
+                      <Icon className="w-5 h-5" />
                     </div>
-                    <div className="space-y-1">
-                      <h3 className="text-3xl font-bold text-gray-900 dark:text-white tracking-tight">
-                        {typeof stat.value === 'number' ? formatNumber(stat.value) : stat.value}
-                      </h3>
-                      <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                        {stat.title}
-                      </p>
+                    <div
+                      className={cn(
+                        'flex items-center text-xs font-semibold rounded-full px-2 py-1 border',
+                        isPositive
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20'
+                          : 'bg-red-50 text-red-700 border-red-100 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20'
+                      )}
+                    >
+                      {stat.trendDirection === 'up' ? (
+                        <ArrowUpRight className="w-3 h-3 mr-1" />
+                      ) : (
+                        <ArrowDownRight className="w-3 h-3 mr-1" />
+                      )}
+                      {stat.trend}%
                     </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-3xl font-bold text-gray-900 dark:text-white tracking-tight">
+                      {typeof stat.value === 'number' ? formatNumber(stat.value) : stat.value}
+                    </h3>
+                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                      {stat.title}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
       </div>
 
       {/* Charts Section */}
@@ -300,11 +300,11 @@ export const Dashboard: React.FC = () => {
                         className={cn(
                           'w-8 h-8 rounded-full flex items-center justify-center shrink-0 border z-10 bg-white dark:bg-gray-900',
                           item.status === 'success' &&
-                            'border-emerald-100 text-emerald-600 dark:border-emerald-900/50 dark:text-emerald-400',
+                          'border-emerald-100 text-emerald-600 dark:border-emerald-900/50 dark:text-emerald-400',
                           item.status === 'warning' &&
-                            'border-amber-100 text-amber-600 dark:border-amber-900/50 dark:text-amber-400',
+                          'border-amber-100 text-amber-600 dark:border-amber-900/50 dark:text-amber-400',
                           item.status === 'info' &&
-                            'border-blue-100 text-blue-600 dark:border-blue-900/50 dark:text-blue-400'
+                          'border-blue-100 text-blue-600 dark:border-blue-900/50 dark:text-blue-400'
                         )}
                       >
                         <Icon className="w-4 h-4" />

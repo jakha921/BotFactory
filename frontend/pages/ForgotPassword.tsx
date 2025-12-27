@@ -2,23 +2,35 @@ import React, { useState } from 'react';
 import { Mail, ArrowRight, ArrowLeft, KeyRound } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { api } from '../services/api';
+import { toast } from 'sonner';
 
 interface ForgotPasswordProps {
   onNavigate: (page: 'login') => void;
 }
 
 export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) => {
+  const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSent, setIsSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     setIsLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      setIsLoading(false);
+
+    try {
+      const response = await api.auth.requestPasswordReset(email);
+      toast.success(response.message);
       setIsSent(true);
-    }, 1500);
+    } catch (err: any) {
+      const errorMsg = err?.response?.data?.email?.[0] || err?.message || 'Failed to send reset email';
+      setError(errorMsg);
+      toast.error(errorMsg);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -48,7 +60,10 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigate }) =>
                 type="email"
                 placeholder="name@company.com"
                 required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 startIcon={<Mail className="w-5 h-5" />}
+                error={error}
               />
 
               <Button

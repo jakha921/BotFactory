@@ -71,15 +71,15 @@ export const BotChat: React.FC = () => {
   console.log('[BotChat] Component rendered');
   const { messages, addMessage, clearMessages } = useChatStore();
   const { selectedBotId } = useAppStore();
-  
+
   // Bot state - load full bot data from API
-  const [selectedBot, setSelectedBot] = useState<any>(null);
+  const [selectedBot, setSelectedBot] = useState<Bot | null>(null);
   const [isLoadingBot, setIsLoadingBot] = useState(false);
-  
+
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isThinkingMode, setIsThinkingMode] = useState(false);
-  
+
   // Knowledge Base State
   const [knowledgeBase, setKnowledgeBase] = useState<{
     documents: Document[];
@@ -179,7 +179,7 @@ export const BotChat: React.FC = () => {
     if (files && files.length > 0) {
       const file = files[0];
       const type = file.type.startsWith('image/') ? 'image' : 'file';
-      
+
       // Store file in attachment for later processing
       const newAttachment: ChatAttachment = {
         id: Date.now().toString(),
@@ -189,7 +189,7 @@ export const BotChat: React.FC = () => {
         size: (file.size / 1024).toFixed(0) + 'KB',
         file: file, // Store File object for processing
       };
-      
+
       setPendingAttachments((prev) => [...prev, newAttachment]);
       toast.success(`File "${file.name}" added. Will be processed when you send the message.`);
     }
@@ -215,7 +215,7 @@ export const BotChat: React.FC = () => {
     try {
       // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      
+
       // Initialize MediaRecorder with WAV format (doesn't require FFmpeg on backend)
       // Try different MIME types in order of preference
       let mimeType = 'audio/webm;codecs=opus'; // Default fallback
@@ -226,21 +226,21 @@ export const BotChat: React.FC = () => {
       } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
         mimeType = 'audio/mp4';
       }
-      
+
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType: mimeType
       });
-      
+
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
-      
+
       // Collect audio chunks
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
-      
+
       // When recording stops, create audio file
       mediaRecorder.onstop = async () => {
         // Stop all tracks to release microphone
@@ -252,10 +252,10 @@ export const BotChat: React.FC = () => {
           const arrayBuffer = await audioBlob.arrayBuffer();
           const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
           const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-          
+
           // Convert AudioBuffer to WAV blob
           const wavBlob = audioBufferToWav(audioBuffer);
-          
+
           // Create audio file in WAV format
           const audioFile = new File([wavBlob], `voice-message-${Date.now()}.wav`, {
             type: 'audio/wav',
@@ -275,7 +275,7 @@ export const BotChat: React.FC = () => {
         } catch (error: any) {
           console.error('[BotChat] Failed to convert audio to WAV:', error);
           toast.error('Ошибка обработки аудио. Попробуйте еще раз.');
-          
+
           // Fallback: send as webm (will try Google Speech API if available)
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
           const audioFile = new File([audioBlob], `voice-message-${Date.now()}.webm`, {
@@ -293,17 +293,17 @@ export const BotChat: React.FC = () => {
           handleSendWithAudio(audioAttachment, audioFile);
         }
       };
-      
+
       // Start recording
       mediaRecorder.start();
       setIsRecording(true);
       setRecordingTime(0);
-      
+
       // Start timer
       recordingTimerRef.current = setInterval(() => {
         setRecordingTime((prev) => prev + 1);
       }, 1000);
-      
+
     } catch (error) {
       console.error('[BotChat] Failed to start recording:', error);
       toast.error('Failed to access microphone. Please grant microphone permissions.');
@@ -313,11 +313,11 @@ export const BotChat: React.FC = () => {
 
   const stopRecording = () => {
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-    
+
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
-    
+
     setIsRecording(false);
   };
 
@@ -344,63 +344,63 @@ export const BotChat: React.FC = () => {
         throw new Error('No bot selected. Please select a bot first.');
       }
 
-          // Transcribe audio using backend API
-          console.log('[BotChat] Transcribing audio...', {
-            fileName: audioFile.name,
-            fileSize: audioFile.size,
-            fileType: audioFile.type,
-          });
-          
-          // Try with different language codes if first attempt fails
-          let transcriptionResult = await api.chat.transcribeAudio(audioFile, 'uz-UZ');
-          
-          // If Uzbek fails, try Russian
-          if (transcriptionResult.error || !transcriptionResult.text) {
-            console.log('[BotChat] Uzbek transcription failed, trying Russian...');
-            transcriptionResult = await api.chat.transcribeAudio(audioFile, 'ru-RU');
-          }
-          
-          // If Russian fails, try English
-          if (transcriptionResult.error || !transcriptionResult.text) {
-            console.log('[BotChat] Russian transcription failed, trying English...');
-            transcriptionResult = await api.chat.transcribeAudio(audioFile, 'en-US');
-          }
-          
-          if (transcriptionResult.error || !transcriptionResult.text) {
-            const errorMsg = transcriptionResult.error || 'Failed to transcribe audio';
-            console.error('[BotChat] All transcription attempts failed:', errorMsg);
-            throw new Error(errorMsg);
-          }
-          
-          const transcribedText = transcriptionResult.text;
-          console.log('[BotChat] Audio transcribed successfully:', {
-            text: transcribedText.substring(0, 100) + '...',
-            confidence: transcriptionResult.confidence,
-            language: transcriptionResult.language_code,
-          });
-          
-          // Update user message with transcribed text
-          userMsg.content = transcribedText;
-      
+      // Transcribe audio using backend API
+      console.log('[BotChat] Transcribing audio...', {
+        fileName: audioFile.name,
+        fileSize: audioFile.size,
+        fileType: audioFile.type,
+      });
+
+      // Try with different language codes if first attempt fails
+      let transcriptionResult = await api.chat.transcribeAudio(audioFile, 'uz-UZ');
+
+      // If Uzbek fails, try Russian
+      if (transcriptionResult.error || !transcriptionResult.text) {
+        console.log('[BotChat] Uzbek transcription failed, trying Russian...');
+        transcriptionResult = await api.chat.transcribeAudio(audioFile, 'ru-RU');
+      }
+
+      // If Russian fails, try English
+      if (transcriptionResult.error || !transcriptionResult.text) {
+        console.log('[BotChat] Russian transcription failed, trying English...');
+        transcriptionResult = await api.chat.transcribeAudio(audioFile, 'en-US');
+      }
+
+      if (transcriptionResult.error || !transcriptionResult.text) {
+        const errorMsg = transcriptionResult.error || 'Failed to transcribe audio';
+        console.error('[BotChat] All transcription attempts failed:', errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      const transcribedText = transcriptionResult.text;
+      console.log('[BotChat] Audio transcribed successfully:', {
+        text: transcribedText.substring(0, 100) + '...',
+        confidence: transcriptionResult.confidence,
+        language: transcriptionResult.language_code,
+      });
+
+      // Update user message with transcribed text
+      userMsg.content = transcribedText;
+
       // Now send transcribed text to bot (similar to handleSend)
       const history = messages.map((m) => ({ role: m.role, content: m.content }));
       history.push({ role: 'user', content: transcribedText }); // Add current message to history
-      
+
       const modelName = selectedBot.model || 'gemini-2.5-flash';
       const thinkingBudget = selectedBot.thinkingBudget || (isThinkingMode ? 32768 : undefined);
-      
+
       // Build system instruction
       let baseSystemInstruction = selectedBot.systemInstruction?.trim() || '';
       if (!baseSystemInstruction || baseSystemInstruction.length < 10) {
         baseSystemInstruction = 'You are a helpful AI assistant created on Bot Factory.';
       }
-      
+
       let systemInstruction = baseSystemInstruction;
-      
+
       // Include knowledge base
       if (knowledgeBase.snippets.length > 0 || knowledgeBase.documents.length > 0) {
         const knowledgeContext: string[] = [];
-        
+
         if (knowledgeBase.snippets.length > 0) {
           knowledgeContext.push('\n\n## 📚 Knowledge Base - Reference Information:');
           knowledgeContext.push('When answering questions, use the following information as your primary source:');
@@ -409,7 +409,7 @@ export const BotChat: React.FC = () => {
             knowledgeContext.push(snippet.content);
           });
         }
-        
+
         if (knowledgeBase.documents.length > 0) {
           const readyDocs = knowledgeBase.documents.filter((doc) => doc.status === 'ready');
           if (readyDocs.length > 0) {
@@ -419,10 +419,10 @@ export const BotChat: React.FC = () => {
             });
           }
         }
-        
+
         systemInstruction = `${baseSystemInstruction}\n\n${knowledgeContext.join('\n')}`;
       }
-      
+
       // Call backend API to generate response (instead of direct Gemini call)
       console.log('[BotChat] Generating response via backend API...');
       const response = await api.chat.generateResponse(
@@ -436,7 +436,7 @@ export const BotChat: React.FC = () => {
 
       // Clean markdown formatting from bot response
       const cleanedText = cleanText(response.text || "I'm sorry, I couldn't generate a response.");
-      
+
       const botMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'model',
@@ -480,22 +480,22 @@ export const BotChat: React.FC = () => {
     // Process file attachments first to extract text
     let processedContent = input;
     const fileContents: string[] = [];
-    
+
     if (pendingAttachments.length > 0) {
       setIsTyping(true);
       toast.info('Processing attachments...');
-      
+
       try {
         // Process files that have File objects stored
         const filePromises = pendingAttachments
           .filter((attachment) => attachment.file && (attachment.type === 'image' || attachment.type === 'file'))
           .map(async (attachment) => {
             if (!attachment.file) return;
-            
+
             try {
               console.log(`[BotChat] Processing file: ${attachment.name}`);
               const result = await api.chat.processFile(attachment.file);
-              
+
               if (result.text && !result.error) {
                 fileContents.push(`\n\n[File: ${attachment.name}]\n${result.text}`);
                 console.log(`[BotChat] File processed successfully: ${attachment.name} (${result.text.length} chars)`);
@@ -508,9 +508,9 @@ export const BotChat: React.FC = () => {
               fileContents.push(`\n\n[File: ${attachment.name} - Could not process: ${error.message || 'Unknown error'}]`);
             }
           });
-        
+
         await Promise.all(filePromises);
-        
+
         // Combine original input with file contents
         if (fileContents.length > 0) {
           processedContent = input + (input ? '\n\n' : '') + fileContents.join('\n\n');
@@ -551,28 +551,28 @@ export const BotChat: React.FC = () => {
       // Use bot settings: model, temperature, thinkingBudget
       const modelName = selectedBot.model || 'gemini-2.5-flash';
       const thinkingBudget = selectedBot.thinkingBudget || (isThinkingMode ? 32768 : undefined);
-      
+
       // Build system instruction - START with bot's instruction (this is the core behavior)
       let baseSystemInstruction = selectedBot.systemInstruction?.trim() || '';
-      
+
       // Validate system instruction exists
       if (!baseSystemInstruction || baseSystemInstruction.length < 10) {
         console.warn('[BotChat] Warning: Bot has no or very short systemInstruction. Using default.');
         baseSystemInstruction = 'You are a helpful AI assistant created on Bot Factory.';
       }
-      
+
       console.log('[BotChat] Base system instruction:', {
         length: baseSystemInstruction.length,
         preview: baseSystemInstruction.substring(0, 150) + '...',
       });
-      
+
       // Build final system instruction with knowledge base
       let systemInstruction = baseSystemInstruction;
-      
+
       // Include knowledge base in system instruction if available
       if (knowledgeBase.snippets.length > 0 || knowledgeBase.documents.length > 0) {
         const knowledgeContext: string[] = [];
-        
+
         // Add snippets to context (these contain actual knowledge)
         if (knowledgeBase.snippets.length > 0) {
           knowledgeContext.push('\n\n## 📚 Knowledge Base - Reference Information:');
@@ -585,7 +585,7 @@ export const BotChat: React.FC = () => {
             }
           });
         }
-        
+
         // Add document summaries to context (metadata only)
         if (knowledgeBase.documents.length > 0) {
           const readyDocs = knowledgeBase.documents.filter((doc) => doc.status === 'ready');
@@ -597,7 +597,7 @@ export const BotChat: React.FC = () => {
             knowledgeContext.push('\nNote: Use information from snippets above when available. Documents are listed for reference.');
           }
         }
-        
+
         // Combine base instruction with knowledge base
         systemInstruction = `${baseSystemInstruction}\n\n${knowledgeContext.join('\n')}`;
       }
@@ -628,7 +628,7 @@ export const BotChat: React.FC = () => {
 
       // Clean markdown formatting from bot response
       const cleanedText = cleanText(response.text || "I'm sorry, I couldn't generate a response.");
-      
+
       const botMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'model',
@@ -719,7 +719,7 @@ export const BotChat: React.FC = () => {
             )}
           </h2>
           <p className="text-sm text-gray-500">
-            {selectedBot 
+            {selectedBot
               ? `Testing ${selectedBot.name} (${selectedBot.model}) configuration in real-time.`
               : 'Please select a bot from the header to start chatting.'}
             {knowledgeBase.snippets.length > 0 || knowledgeBase.documents.length > 0 ? (
@@ -796,11 +796,11 @@ export const BotChat: React.FC = () => {
                   msg.role === 'user'
                     ? 'bg-primary text-white rounded-tr-none'
                     : cn(
-                        'text-gray-900 dark:text-gray-100 rounded-tl-none border',
-                        msg.isThinking
-                          ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-100 dark:border-purple-800/50'
-                          : 'bg-gray-100 dark:bg-gray-800 border-transparent'
-                      )
+                      'text-gray-900 dark:text-gray-100 rounded-tl-none border',
+                      msg.isThinking
+                        ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-100 dark:border-purple-800/50'
+                        : 'bg-gray-100 dark:bg-gray-800 border-transparent'
+                    )
                 )}
               >
                 {/* Render Attachments */}

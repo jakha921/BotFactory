@@ -13,6 +13,8 @@ from apps.accounts.views import (
     user_update_view,
     subscription_usage_view,
     UserAPIKeyViewSet,
+    password_reset_request_view,
+    password_reset_confirm_view,
 )
 
 app_name = 'accounts'
@@ -28,6 +30,9 @@ urlpatterns = [
     path('refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('me/', user_me_view, name='me'),
     path('me/update/', user_update_view, name='me_update'),
+    # Password Reset
+    path('password-reset/', password_reset_request_view, name='password_reset'),
+    path('password-reset/confirm/', password_reset_confirm_view, name='password_reset_confirm'),
     # API Keys management
     path('', include(router.urls)),
 ]

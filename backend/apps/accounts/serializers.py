@@ -193,3 +193,31 @@ class UserAPIKeyCreateSerializer(serializers.Serializer):
         api_key.save()
         
         return api_key
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    """Request password reset via email."""
+    email = serializers.EmailField(required=True)
+    
+    def validate_email(self, value):
+        if not User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("No account found with this email.")
+        return value
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    """Confirm password reset with token."""
+    token = serializers.CharField(required=True)
+    uid = serializers.CharField(required=True)
+    new_password = serializers.CharField(
+        required=True,
+        validators=[validate_password]
+    )
+    new_password_confirm = serializers.CharField(required=True)
+    
+    def validate(self, attrs):
+        if attrs['new_password'] != attrs['new_password_confirm']:
+            raise serializers.ValidationError({
+                'new_password_confirm': 'Passwords do not match.'
+            })
+        return attrs

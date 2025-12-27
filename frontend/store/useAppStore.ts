@@ -1,10 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Bot, ApiKey } from '../types';
+import { Bot } from '../types';
 
 interface AppState {
   bots: Bot[];
-  apiKeys: ApiKey[];
   selectedBotId: string | null;
   monitoringUserId: string | null; // For navigation from Users to Monitoring
   testTelegramUserId: string; // Added for Developer Settings
@@ -14,15 +13,12 @@ interface AppState {
   setMonitoringUserId: (id: string | null) => void;
   setTestTelegramUserId: (id: string) => void;
   getSelectedBot: () => Bot | undefined;
-  addApiKey: (key: ApiKey) => void;
-  deleteApiKey: (id: string) => void;
 }
 
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       bots: [],
-      apiKeys: [],
       selectedBotId: null,
       monitoringUserId: null,
       testTelegramUserId: '',
@@ -44,21 +40,10 @@ export const useAppStore = create<AppState>()(
         if (!Array.isArray(bots)) return undefined;
         return bots.find((b) => b.id === selectedBotId);
       },
-
-      addApiKey: (key) =>
-        set((state) => ({
-          apiKeys: [...state.apiKeys, key],
-        })),
-
-      deleteApiKey: (id) =>
-        set((state) => ({
-          apiKeys: state.apiKeys.filter((k) => k.id !== id),
-        })),
     }),
     {
       name: 'bot-factory-storage',
       partialize: (state) => ({
-        apiKeys: state.apiKeys,
         selectedBotId: state.selectedBotId,
         testTelegramUserId: state.testTelegramUserId,
       }),

@@ -335,3 +335,77 @@ class UserAPIKeyViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         self.perform_destroy(instance)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def password_reset_request_view(request):
+    """Send password reset email."""
+    from django.contrib.auth.tokens import default_token_generator
+    from django.utils.http import urlsafe_base64_encode
+    from django.utils.encoding import force_bytes
+    from django.core.mail import send_mail
+    from django.conf import settings
+    from apps.accounts.serializers import PasswordResetRequestSerializer
+    
+    serializer = PasswordResetRequestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    
+    email = serializer.validated_data['email']
+    user = User.objects.get(email=email)
+    
+    # Generate token
+    token = default_token_generator.make_token(user)
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    
+    # Create reset link
+    frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5173')
+    reset_url = f"{frontend_url}/reset-password?uid={uid}&token={token}"
+    
+    # Send email
+    try:
+        send_mail(
+            subject='Reset Your Bot Factory Password',
+            message=f'Click the link to reset your password: {reset_url}\n\nThis link expires in 1 hour.',
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[email],
+            fail_silently=False,
+        )
+    except Exception as e:
+        return Response(
+            {'error': f'Failed to send email: {str(e)}'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    
+    return Response({
+        'message': 'Password reset email sent. Please check your inbox.'
+    })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def password_reset_confirm_view(request):
+    """Reset password with token."""
+    from django.contrib.auth.tokens import default_token_generator
+    from django.utils.http import urlsafe_base64_decode
+    from django.utils.encoding import force_str
+    from apps.accounts.serializers import PasswordResetConfirmSerializer
+    
+    serializer = PasswordResetConfirmSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    
+    try:
+        uid = force_str(urlsafe_base64_decode(serializer.validated_data['uid']))
+        user = User.objects.get(pk=uid)
+    except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+        raise ValidationError({'uid': 'Invalid user ID'})
+    
+    # Verify token
+    if not default_token_generator.check_token(user, serializer.validated_data['token']):
+        raise ValidationError({'token': 'Invalid or expired token'})
+    
+    # Set new password
+    user.set_password(serializer.validated_data['new_password'])
+    user.save()
+    
+    return Response({'message': 'Password reset successful. You can now log in.'})

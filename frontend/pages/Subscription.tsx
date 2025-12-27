@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { cn } from '../utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuthStore } from '../store/useAuthStore';
+import { UsageData } from '../types';
 
 export const Subscription: React.FC = () => {
   console.log('[Subscription] Component rendered');

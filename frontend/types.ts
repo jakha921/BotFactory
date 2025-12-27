@@ -216,3 +216,61 @@ export type View =
   | 'users'
   | 'subscription'
   | 'monitoring';
+
+// Dashboard Types
+export interface DashboardStats {
+  title: string;
+  value: number | string;
+  trend: number;
+  trendDirection: 'up' | 'down';
+  color: 'blue' | 'indigo' | 'amber' | 'green';
+  icon: any; // LucideIcon type
+}
+
+export interface ChartDataPoint {
+  name: string;
+  value: number;
+}
+
+export interface ActivityItem {
+  id: string;
+  title: string;
+  description: string;
+  time: string;
+  user: string;
+  status: 'success' | 'warning' | 'info';
+  icon: any; // LucideIcon type
+}
+
+// Subscription Types
+export interface UsageData {
+  plan: 'Free' | 'Pro' | 'Enterprise';
+  renewalDate: string;
+  bots: {
+    used: number;
+    limit: number | null;
+  };
+  documents: {
+    used: number;
+    limit: number;
+  };
+  apiCalls: {
+    used: number;
+    limit: number;
+  };
+}
+
+export interface Invoice {
+  id: string;
+  invoice_number: string;
+  date: string;
+  amount: string;
+  status: 'paid' | 'pending' | 'failed';
+  pdf_url?: string;
+}
+
+export interface NotificationPreferences {
+  email_alerts: boolean;
+  push_notifications: boolean;
+  weekly_digest: boolean;
+}
