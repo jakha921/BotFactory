@@ -15,12 +15,15 @@ from apps.accounts.views import (
     UserAPIKeyViewSet,
     password_reset_request_view,
     password_reset_confirm_view,
+    change_password_view,
+    NotificationPreferencesViewSet,
 )
 
 app_name = 'accounts'
 
 router = DefaultRouter()
 router.register(r'api-keys', UserAPIKeyViewSet, basename='user-api-keys')
+router.register(r'notifications', NotificationPreferencesViewSet, basename='notifications')
 
 urlpatterns = [
     # Authentication endpoints
@@ -33,6 +36,8 @@ urlpatterns = [
     # Password Reset
     path('password-reset/', password_reset_request_view, name='password_reset'),
     path('password-reset/confirm/', password_reset_confirm_view, name='password_reset_confirm'),
-    # API Keys management
+    # Password Change
+    path('change-password/', change_password_view, name='change_password'),
+    # API Keys management and Notifications
     path('', include(router.urls)),
 ]

@@ -3,7 +3,7 @@ Serializers for accounts app.
 """
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
-from apps.accounts.models import User, UserAPIKey
+from apps.accounts.models import User, UserAPIKey, UserNotificationPreferences
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -221,3 +221,28 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
                 'new_password_confirm': 'Passwords do not match.'
             })
         return attrs
+
+
+class PasswordChangeSerializer(serializers.Serializer):
+    """Change user password."""
+    current_password = serializers.CharField(required=True, write_only=True)
+    new_password = serializers.CharField(
+        required=True, 
+        write_only=True,
+        validators=[validate_password]
+    )
+    new_password_confirm = serializers.CharField(required=True, write_only=True)
+    
+    def validate(self, attrs):
+        if attrs['new_password'] != attrs['new_password_confirm']:
+            raise serializers.ValidationError({
+                'new_password_confirm': 'Passwords do not match.'
+            })
+        return attrs
+
+
+class NotificationPreferencesSerializer(serializers.ModelSerializer):
+    """Serializer for user notification preferences."""
+    class Meta:
+        model = UserNotificationPreferences
+        fields = ['email_alerts', 'push_notifications', 'weekly_digest']

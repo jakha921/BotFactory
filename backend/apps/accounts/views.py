@@ -21,6 +21,7 @@ from apps.accounts.serializers import (
     UserUpdateSerializer,
     UserAPIKeySerializer,
     UserAPIKeyCreateSerializer,
+    NotificationPreferencesSerializer,
 )
 from rest_framework.exceptions import AuthenticationFailed, ValidationError as DRFValidationError, Throttled
 from apps.bots.models import Bot
@@ -409,3 +410,52 @@ def password_reset_confirm_view(request):
     user.save()
     
     return Response({'message': 'Password reset successful. You can now log in.'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password_view(request):
+    """Change user password."""
+    from apps.accounts.serializers import PasswordChangeSerializer
+    
+    serializer = PasswordChangeSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    
+    # Verify current password
+    if not request.user.check_password(serializer.validated_data['current_password']):
+        raise DRFValidationError({'current_password': 'Incorrect password'})
+    
+    # Set new password
+    request.user.set_password(serializer.validated_data['new_password'])
+    request.user.save()
+    
+    return Response({'message': 'Password changed successfully'})
+
+
+class NotificationPreferencesViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing user notification preferences."""
+    permission_classes = [IsAuthenticated]
+    serializer_class = NotificationPreferencesSerializer
+    http_method_names = ['get', 'put', 'patch']
+    
+    def get_object(self):
+        """Get or create notification preferences for current user."""
+        from apps.accounts.models import UserNotificationPreferences
+        prefs, created = UserNotificationPreferences.objects.get_or_create(
+            user=self.request.user
+        )
+        return prefs
+    
+    def list(self, request):
+        """Return user's notification preferences."""
+        prefs = self.get_object()
+        serializer = self.get_serializer(prefs)
+        return Response(serializer.data)
+    
+    def update(self, request, *args, **kwargs):
+        """Update user's notification preferences."""
+        prefs = self.get_object()
+        serializer = self.get_serializer(prefs, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
