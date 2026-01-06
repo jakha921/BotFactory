@@ -14,8 +14,8 @@ class UserAdmin(ModelAdmin, BaseUserAdmin):
     """Admin interface for User model using django-unfold."""
     
     list_display = [
+        'username',
         'email',
-        'name',
         'plan',
         'is_active',
         'is_staff',
@@ -29,8 +29,8 @@ class UserAdmin(ModelAdmin, BaseUserAdmin):
         'created_at',
     ]
     search_fields = [
+        'username',
         'email',
-        'name',
     ]
     ordering = ['-created_at']
     readonly_fields = ['id', 'created_at', 'updated_at', 'last_login']
@@ -40,7 +40,7 @@ class UserAdmin(ModelAdmin, BaseUserAdmin):
             'fields': ('id', 'email', 'password')
         }),
         ('Personal Info', {
-            'fields': ('name', 'avatar', 'telegram_id')
+            'fields': ('username', 'first_name', 'last_name', 'telegram_id')
         }),
         ('Subscription', {
             'fields': ('plan',)
@@ -56,6 +56,6 @@ class UserAdmin(ModelAdmin, BaseUserAdmin):
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('email', 'name', 'password1', 'password2', 'plan'),
+            'fields': ('username', 'email', 'password1', 'password2', 'plan'),
         }),
     )

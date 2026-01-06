@@ -43,12 +43,13 @@ export const Settings: React.FC = () => {
     telegramId: user?.telegramId ? String(user.telegramId) : '',
   });
 
-  // Mock Notification Preferences
+  // Notification Preferences State
   const [notificationPrefs, setNotificationPrefs] = useState({
     email: true,
     push: false,
     weeklyDigest: true,
   });
+  const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
 
   // API Key State
   const [apiKeys, setApiKeys] = useState<Array<{
@@ -84,6 +85,8 @@ export const Settings: React.FC = () => {
   useEffect(() => {
     if (activeTab === 'api_keys') {
       loadAPIKeys();
+    } else if (activeTab === 'notifications') {
+      loadNotifications();
     }
   }, [activeTab]);
 
@@ -97,6 +100,23 @@ export const Settings: React.FC = () => {
       toast.error('Failed to load API keys');
     } finally {
       setIsLoadingKeys(false);
+    }
+  };
+
+  const loadNotifications = async () => {
+    setIsLoadingNotifications(true);
+    try {
+      const prefs = await api.auth.getNotifications();
+      setNotificationPrefs({
+        email: prefs.email_alerts,
+        push: prefs.push_notifications,
+        weeklyDigest: prefs.weekly_digest,
+      });
+    } catch (error: any) {
+      console.error('[Settings] Failed to load notifications:', error);
+      toast.error('Failed to load notification preferences');
+    } finally {
+      setIsLoadingNotifications(false);
     }
   };
 
@@ -122,11 +142,53 @@ export const Settings: React.FC = () => {
     }
   };
 
-  const toggleNotification = (key: keyof typeof notificationPrefs) => {
+  const handlePasswordSubmit = async () => {
+    if (!passwords.current || !passwords.new || !passwords.confirm) {
+      toast.error('Please fill all password fields');
+      return;
+    }
+
+    if (passwords.new !== passwords.confirm) {
+      toast.error('New passwords do not match');
+      return;
+    }
+
+    try {
+      const response = await api.auth.changePassword(passwords.current, passwords.new);
+      toast.success(response.message || 'Password changed successfully');
+      setPasswords({ current: '', new: '', confirm: '' });
+    } catch (error: any) {
+      const errorMsg = error?.response?.data?.current_password?.[0] ||
+        error?.response?.data?.new_password?.[0] ||
+        error?.message ||
+        'Failed to change password';
+      toast.error(errorMsg);
+    }
+  };
+
+  const toggleNotification = async (key: keyof typeof notificationPrefs) => {
+    const newValue = !notificationPrefs[key];
+
+    // Optimistically update UI
     setNotificationPrefs((prev) => ({
       ...prev,
-      [key]: !prev[key],
+      [key]: newValue,
     }));
+
+    try {
+      await api.auth.updateNotifications({
+        [key === 'email' ? 'email_alerts' :
+          key === 'push' ? 'push_notifications' :
+            'weekly_digest']: newValue
+      });
+    } catch (error: any) {
+      // Revert on error
+      setNotificationPrefs((prev) => ({
+        ...prev,
+        [key]: !newValue,
+      }));
+      toast.error('Failed to update notification preferences');
+    }
   };
 
   const handleCopyKey = (text: string) => {

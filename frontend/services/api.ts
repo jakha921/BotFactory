@@ -629,6 +629,33 @@ export const api = {
       client.delete<void>(`auth/api-keys/${id}/`).then(() => undefined),
   },
 
+  auth: {
+    getNotifications: async (): Promise<{
+      email_alerts: boolean;
+      push_notifications: boolean;
+      weekly_digest: boolean;
+    }> => client.get('auth/notifications/'),
+
+    updateNotifications: async (prefs: {
+      email_alerts?: boolean;
+      push_notifications?: boolean;
+      weekly_digest?: boolean;
+    }): Promise<{
+      email_alerts: boolean;
+      push_notifications: boolean;
+      weekly_digest: boolean;
+    }> => client.patch('auth/notifications/', prefs),
+
+    changePassword: async (
+      currentPassword: string,
+      newPassword: string
+    ): Promise<{ message: string }> =>
+      client.post('auth/change-password/', {
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+  },
+
   subscription: {
     usage: (): Promise<unknown> =>
       client.get<unknown>('subscription/'),

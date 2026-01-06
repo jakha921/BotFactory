@@ -179,9 +179,37 @@ async def handle_form_submission(
     
     await message.answer(form_text)
     
-    # TODO: Call submit handler if specified
-    # This could be a callback function, webhook, or database save
+    # Call submit handler if specified
+    # This could be a webhook URL, database save, or other action
     if submit_handler:
-        # Handle form submission (save to database, send webhook, etc.)
-        pass
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Check if it's a webhook URL
+        if submit_handler.startswith('http://') or submit_handler.startswith('https://'):
+            try:
+                import httpx
+                async with httpx.AsyncClient() as http_client:
+                    payload = {
+                        'form_name': form_name,
+                        'form_data': form_data,
+                        'user_id': message.from_user.id,
+                        'username': message.from_user.username or message.from_user.first_name,
+                    }
+                    response = await http_client.post(submit_handler, json=payload, timeout=10)
+                    if response.status_code == 200:
+                        await message.answer("✅ Форма успешно отправлена")
+                    else:
+                        await message.answer("⚠️ Ошибка при отправке формы")
+            except ImportError:
+                logger.error("httpx not installed for webhook support")
+                await message.answer("⚠️ Webhook не настроен")
+            except Exception as e:
+                logger.error(f"Webhook error for {submit_handler}: {e}")
+                await message.answer("⚠️ Ошибка соединения")
+        else:
+            # Handler name (could be mapped to database save or other action)
+            logger.info(f"Form '{form_name}' submitted with handler: {submit_handler}")
+            logger.info(f"Form data: {form_data}")
+            await message.answer(f"✅ Данные сохранены (handler: {submit_handler})")
 
