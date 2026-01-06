@@ -2,8 +2,6 @@
 Admin configuration for accounts app.
 """
 from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from unfold.decorators import display
 from unfold.admin import ModelAdmin
 
 from apps.accounts.models import User, Tenant
@@ -35,12 +33,12 @@ class TenantAdmin(ModelAdmin):
 
 
 @admin.register(User)
-class UserAdmin(ModelAdmin, BaseUserAdmin):
+class UserAdmin(ModelAdmin):
     """Admin interface for User model using django-unfold."""
 
     list_display = [
-        'username',
         'email',
+        'name',
         'tenant',
         'is_active',
         'is_staff',
@@ -55,8 +53,8 @@ class UserAdmin(ModelAdmin, BaseUserAdmin):
         'created_at',
     ]
     search_fields = [
-        'username',
         'email',
+        'name',
     ]
     ordering = ['-created_at']
     readonly_fields = ['id', 'created_at', 'updated_at', 'last_login']
@@ -69,7 +67,7 @@ class UserAdmin(ModelAdmin, BaseUserAdmin):
             'fields': ('tenant',)
         }),
         ('Personal Info', {
-            'fields': ('username', 'first_name', 'last_name', 'telegram_id')
+            'fields': ('name', 'telegram_id', 'avatar')
         }),
         ('Permissions', {
             'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')
@@ -82,6 +80,6 @@ class UserAdmin(ModelAdmin, BaseUserAdmin):
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('username', 'email', 'password1', 'password2', 'tenant'),
+            'fields': ('email', 'name', 'password1', 'password2', 'tenant'),
         }),
     )
