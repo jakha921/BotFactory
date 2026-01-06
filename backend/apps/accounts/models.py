@@ -7,19 +7,133 @@ from cryptography.fernet import Fernet
 from django.conf import settings
 
 
+class Tenant(models.Model):
+    """Organization/Company - owner of bots."""
+    name = models.CharField(max_length=255, verbose_name="Name")
+    slug = models.SlugField(unique=True, max_length=100)
+
+    # Plan type
+    PLAN_CHOICES = [
+        ('FREE', 'Free'),
+        ('STARTER', 'Starter'),
+        ('PRO', 'Pro'),
+        ('ENTERPRISE', 'Enterprise'),
+    ]
+    plan = models.CharField(
+        max_length=20,
+        choices=PLAN_CHOICES,
+        default='FREE',
+        verbose_name="Plan"
+    )
+    plan_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Plan expires at"
+    )
+
+    # Limits
+    max_bots = models.IntegerField(
+        default=1,
+        verbose_name="Max bots",
+        help_text="Maximum number of bots allowed"
+    )
+    max_messages_per_month = models.IntegerField(
+        default=1000,
+        verbose_name="Max messages per month"
+    )
+    messages_used = models.IntegerField(
+        default=0,
+        verbose_name="Messages used"
+    )
+
+    # AI settings
+    openai_api_key = models.CharField(
+        max_length=500,
+        null=True,
+        blank=True,
+        verbose_name="OpenAI API Key",
+        help_text="Encrypted API key for OpenAI"
+    )
+    use_platform_key = models.BooleanField(
+        default=True,
+        verbose_name="Use platform key",
+        help_text="Use platform's API key instead of custom"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created at")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated at")
+
+    class Meta:
+        verbose_name = "Tenant"
+        verbose_name_plural = "Tenants"
+        ordering = ['-created_at']
+        db_table = 'accounts_tenant'
+
+    def __str__(self):
+        return f"{self.name} ({self.plan})"
+
+    @property
+    def has_openai_key(self) -> bool:
+        """Check if tenant has custom OpenAI key."""
+        return bool(self.openai_api_key and not self.use_platform_key)
+
+    def get_openai_key(self) -> str:
+        """Get decrypted OpenAI key."""
+        if not self.openai_api_key:
+            return settings.OPENAI_API_KEY or ""
+
+        try:
+            fernet_key = settings.ENCRYPTION_KEY.encode()
+            f = Fernet(fernet_key)
+            return f.decrypt(self.openai_api_key.encode()).decode()
+        except Exception:
+            return ""
+
+    def set_openai_key(self, key: str) -> None:
+        """Encrypt and set OpenAI key."""
+        fernet_key = settings.ENCRYPTION_KEY.encode()
+        f = Fernet(fernet_key)
+        self.openai_api_key = f.encrypt(key.encode()).decode()
+
+    def can_create_bot(self) -> bool:
+        """Check if tenant can create more bots."""
+        return self.bots.count() < self.max_bots
+
+    def has_messages_remaining(self) -> bool:
+        """Check if tenant has messages remaining this month."""
+        return self.messages_used < self.max_messages_per_month
+
+
 class User(AbstractUser):
     """Custom User model with telegram integration."""
-    telegram_id = models.BigIntegerField(null=True, blank=True, unique=False)  # Changed from unique=True
-    plan = models.CharField(max_length=50, default='Free')  # Added plan field
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    tenant = models.ForeignKey(
+        'Tenant',
+        on_delete=models.CASCADE,
+        related_name='users',
+        null=True,  # Temporarily null for migration
+        blank=True,
+        verbose_name="Organization"
+    )
+    telegram_id = models.BigIntegerField(
+        null=True,
+        blank=True,
+        unique=False,
+        verbose_name="Telegram ID"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created at")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated at")
     
     class Meta:
         db_table = 'auth_user'
         swappable = 'AUTH_USER_MODEL'
         verbose_name = 'user'
         verbose_name_plural = 'users'
-    
+
+    @property
+    def plan(self):
+        """Get plan from tenant for backward compatibility."""
+        return self.tenant.plan if self.tenant else 'FREE'
+
     def __str__(self):
         return self.username or self.email
 

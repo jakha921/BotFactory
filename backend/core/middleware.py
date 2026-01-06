@@ -9,6 +9,36 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 
+class TenantMiddleware(MiddlewareMixin):
+    """
+    Middleware to resolve tenant from authenticated user or headers.
+
+    Sets request.tenant for tenant-aware filtering throughout the app.
+    """
+
+    def process_request(self, request):
+        """Resolve tenant and attach to request."""
+        # If user is authenticated, get their tenant
+        if request.user.is_authenticated and hasattr(request.user, 'tenant'):
+            request.tenant = request.user.tenant
+            return None
+
+        # For API requests, check for tenant slug in header
+        # This allows service-to-service communication with tenant context
+        tenant_slug = request.META.get('HTTP_X_TENANT_SLUG')
+        if tenant_slug:
+            try:
+                from apps.accounts.models import Tenant
+                request.tenant = Tenant.objects.get(slug=tenant_slug)
+            except Tenant.DoesNotExist:
+                logger.warning(f"Tenant not found for slug: {tenant_slug}")
+                request.tenant = None
+        else:
+            request.tenant = None
+
+        return None
+
+
 class NgrokHostMiddleware(MiddlewareMixin):
     """
     Middleware to allow ngrok domains in development.
