@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     # Local apps
     'apps.accounts',
     'apps.bots',
+    'apps.commands',
     'apps.knowledge',
     'apps.telegram',  # Must be before chat (chat references TelegramUser)
     'apps.chat',
