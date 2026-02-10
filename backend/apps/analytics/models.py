@@ -168,21 +168,21 @@ class TokenUsage(models.Model):
 
 class UserRetention(models.Model):
     """Retention cohort analysis - возвращаются ли пользователи."""
-    
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     bot = models.ForeignKey('bots.Bot', on_delete=models.CASCADE, related_name='retention_cohorts')
     cohort_date = models.DateField(help_text="Дата первого использования бота (cohort)")
-    
+
     # Retention по дням
     day_1_retained = models.IntegerField(default=0, help_text="Пользователей, вернувшихся на 1-й день")
     day_7_retained = models.IntegerField(default=0, help_text="Пользователей, вернувшихся на 7-й день")
     day_30_retained = models.IntegerField(default=0, help_text="Пользователей, вернувшихся на 30-й день")
-    
+
     total_users_in_cohort = models.IntegerField(default=0, help_text="Всего пользователей в cohort")
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         verbose_name = 'User Retention'
         verbose_name_plural = 'User Retention'
@@ -191,21 +191,147 @@ class UserRetention(models.Model):
         indexes = [
             models.Index(fields=['bot', 'cohort_date']),
         ]
-    
+
     def __str__(self):
         return f"{self.bot.name} - Cohort {self.cohort_date}"
-    
+
     @property
     def day_1_retention_rate(self):
         """Процент retention на 1-й день."""
         return (self.day_1_retained / self.total_users_in_cohort * 100) if self.total_users_in_cohort > 0 else 0
-    
+
     @property
     def day_7_retention_rate(self):
         """Процент retention на 7-й день."""
         return (self.day_7_retained / self.total_users_in_cohort * 100) if self.total_users_in_cohort > 0 else 0
-    
+
     @property
     def day_30_retention_rate(self):
         """Процент retention на 30-й день."""
         return (self.day_30_retained / self.total_users_in_cohort * 100) if self.total_users_in_cohort > 0 else 0
+
+
+class WebhookEvent(models.Model):
+    """Логирование webhook событий для мониторинга."""
+
+    EVENT_TYPE_CHOICES = [
+        ('received', 'Webhook Received'),
+        ('processed', 'Update Processed'),
+        ('error', 'Processing Error'),
+        ('response_sent', 'Response Sent'),
+        ('retry', 'Delivery Retry'),
+    ]
+
+    STATUS_CHOICES = [
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+        ('pending', 'Pending'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    bot = models.ForeignKey('bots.Bot', on_delete=models.CASCADE, related_name='webhook_events')
+
+    event_type = models.CharField(max_length=20, choices=EVENT_TYPE_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+
+    # Update details
+    update_id = models.BigIntegerField(help_text="Telegram update_id")
+    webhook_delivery_time = models.DateTimeField(help_text="Когда webhook был получен от Telegram")
+
+    # Processing metrics
+    processing_time_ms = models.IntegerField(null=True, blank=True, help_text="Время обработки (мс)")
+    celery_task_id = models.CharField(max_length=255, null=True, blank=True, help_text="Celery task ID")
+
+    # Response details
+    response_sent = models.BooleanField(default=False, help_text="Был ли отправлен ответ")
+    response_time_ms = models.IntegerField(null=True, blank=True, help_text="Время отправки ответа (мс)")
+
+    # Error tracking
+    error_type = models.CharField(max_length=100, blank=True, help_text="Тип ошибки")
+    error_message = models.TextField(blank=True, help_text="Сообщение об ошибке")
+    retry_count = models.IntegerField(default=0, help_text="Количество попыток повтора")
+
+    # Metadata
+    ip_address = models.GenericIPAddressField(null=True, blank=True, help_text="IP адрес запроса")
+    user_agent = models.TextField(blank=True, help_text="User Agent")
+    telegram_signature_valid = models.BooleanField(default=True, help_text="Валидна ли подпись Telegram")
+
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = 'Webhook Event'
+        verbose_name_plural = 'Webhook Events'
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['bot', 'timestamp']),
+            models.Index(fields=['event_type', 'timestamp']),
+            models.Index(fields=['status', 'timestamp']),
+            models.Index(fields=['update_id']),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} - {self.bot.name} - Update {self.update_id}"
+
+    @property
+    def total_processing_time_ms(self):
+        """Общее время обработки (включая отправку ответа)."""
+        total = self.processing_time_ms or 0
+        if self.response_time_ms:
+            total += self.response_time_ms
+        return total
+
+
+class WebhookMetrics(models.Model):
+    """Агрегированные метрики webhook для мониторинга."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    bot = models.ForeignKey('bots.Bot', on_delete=models.CASCADE, related_name='webhook_metrics')
+    date = models.DateField(help_text="Дата метрик")
+    hour = models.IntegerField(default=0, help_text="Час (0-23)")
+
+    # Request metrics
+    requests_received = models.IntegerField(default=0, help_text="Получено webhook запросов")
+    requests_processed = models.IntegerField(default=0, help_text="Успешно обработано")
+    requests_failed = models.IntegerField(default=0, help_text="Неуспешных запросов")
+
+    # Performance metrics
+    avg_processing_time_ms = models.IntegerField(default=0, help_text="Среднее время обработки (мс)")
+    p95_processing_time_ms = models.IntegerField(default=0, help_text="95-й перцентиль времени обработки")
+    p99_processing_time_ms = models.IntegerField(default=0, help_text="99-й перцентиль времени обработки")
+
+    # Response metrics
+    responses_sent = models.IntegerField(default=0, help_text="Отправлено ответов")
+    avg_response_time_ms = models.IntegerField(default=0, help_text="Среднее время ответа (мс)")
+
+    # Error breakdown
+    signature_validation_failures = models.IntegerField(default=0, help_text="Ошибок валидации подписи")
+    processing_errors = models.IntegerField(default=0, help_text="Ошибок обработки")
+    timeout_errors = models.IntegerField(default=0, help_text="Таймаутов")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Webhook Metrics'
+        verbose_name_plural = 'Webhook Metrics'
+        unique_together = ['bot', 'date', 'hour']
+        ordering = ['-date', '-hour']
+        indexes = [
+            models.Index(fields=['bot', 'date', 'hour']),
+            models.Index(fields=['date']),
+        ]
+
+    def __str__(self):
+        return f"{self.bot.name} - {self.date} {self.hour}:00"
+
+    @property
+    def success_rate(self):
+        """Процент успешных обработок."""
+        total = self.requests_received
+        return (self.requests_processed / total * 100) if total > 0 else 0
+
+    @property
+    def error_rate(self):
+        """Процент ошибок."""
+        total = self.requests_received
+        return (self.requests_failed / total * 100) if total > 0 else 0

@@ -14,7 +14,12 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 from apps.bots.public_views import PublicChatView
-from apps.core.health_views import HealthCheckView, ReadinessCheckView
+from apps.core.health_views import (
+    HealthCheckView,
+    ReadinessCheckView,
+    WebhookHealthCheckView,
+    BotWebhookHealthView
+)
 
 # Customize admin site
 admin.site.site_header = "Bot Factory Administration"
@@ -34,6 +39,8 @@ urlpatterns = [
     # Health check endpoints
     path('api/health/', HealthCheckView.as_view(), name='health-check'),
     path('api/health/ready/', ReadinessCheckView.as_view(), name='readiness-check'),
+    path('api/health/webhook/', WebhookHealthCheckView.as_view(), name='webhook-health-check'),
+    path('api/health/webhook/<uuid:bot_id>/', BotWebhookHealthView.as_view(), name='bot-webhook-health'),
     
     # Webhook endpoint for Telegram updates (must be before API routes)
     # POST /webhook/<token>/

@@ -3,7 +3,10 @@ Admin configuration for analytics app.
 """
 from django.contrib import admin
 from unfold.admin import ModelAdmin
-from .models import BotAnalytics, MessageEvent, UserFeedback, TokenUsage, UserRetention
+from .models import (
+    BotAnalytics, MessageEvent, UserFeedback,
+    TokenUsage, UserRetention, WebhookEvent, WebhookMetrics
+)
 
 
 @admin.register(BotAnalytics)
@@ -48,3 +51,61 @@ class UserRetentionAdmin(ModelAdmin):
     search_fields = ['bot__name']
     readonly_fields = ['created_at', 'updated_at']
     date_hierarchy = 'cohort_date'
+
+
+@admin.register(WebhookEvent)
+class WebhookEventAdmin(ModelAdmin):
+    list_display = ['bot', 'event_type', 'status', 'update_id', 'processing_time_ms', 'telegram_signature_valid', 'timestamp']
+    list_filter = ['event_type', 'status', 'telegram_signature_valid', 'timestamp']
+    search_fields = ['bot__name', 'error_type', 'error_message']
+    readonly_fields = ['timestamp', 'total_processing_time_ms']
+    date_hierarchy = 'timestamp'
+
+    fieldsets = (
+        ('Basic Info', {
+            'fields': ('bot', 'event_type', 'status', 'update_id', 'webhook_delivery_time')
+        }),
+        ('Processing', {
+            'fields': ('processing_time_ms', 'celery_task_id', 'response_sent', 'response_time_ms')
+        }),
+        ('Errors', {
+            'fields': ('error_type', 'error_message', 'retry_count'),
+            'classes': ('collapse',)
+        }),
+        ('Metadata', {
+            'fields': ('ip_address', 'user_agent', 'telegram_signature_valid')
+        }),
+        ('Read-only', {
+            'fields': ('timestamp', 'total_processing_time_ms')
+        }),
+    )
+
+
+@admin.register(WebhookMetrics)
+class WebhookMetricsAdmin(ModelAdmin):
+    list_display = ['bot', 'date', 'hour', 'requests_received', 'success_rate', 'error_rate', 'avg_processing_time_ms']
+    list_filter = ['date', 'bot']
+    search_fields = ['bot__name']
+    readonly_fields = ['success_rate', 'error_rate', 'created_at', 'updated_at']
+    date_hierarchy = 'date'
+
+    fieldsets = (
+        ('Basic Info', {
+            'fields': ('bot', 'date', 'hour')
+        }),
+        ('Request Metrics', {
+            'fields': ('requests_received', 'requests_processed', 'requests_failed')
+        }),
+        ('Performance Metrics', {
+            'fields': ('avg_processing_time_ms', 'p95_processing_time_ms', 'p99_processing_time_ms')
+        }),
+        ('Response Metrics', {
+            'fields': ('responses_sent', 'avg_response_time_ms')
+        }),
+        ('Error Breakdown', {
+            'fields': ('signature_validation_failures', 'processing_errors', 'timeout_errors')
+        }),
+        ('Read-only', {
+            'fields': ('success_rate', 'error_rate', 'created_at', 'updated_at')
+        }),
+    )

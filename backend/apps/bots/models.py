@@ -43,6 +43,11 @@ class Bot(models.Model):
         ('openai', 'OpenAI'),
         ('anthropic', 'Anthropic'),
     ]
+
+    DELIVERY_MODE_CHOICES = [
+        ('polling', 'Polling'),
+        ('webhook', 'Webhook'),
+    ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(
@@ -57,6 +62,17 @@ class Bot(models.Model):
         choices=STATUS_CHOICES,
         default='draft'
     )
+    delivery_mode = models.CharField(
+        max_length=20,
+        choices=DELIVERY_MODE_CHOICES,
+        default='polling',
+        help_text="How Telegram updates are delivered: polling (bot service) or webhook (HTTP callback)"
+    )
+    webhook_url = models.URLField(
+        max_length=500,
+        blank=True,
+        help_text="Custom webhook URL (optional, uses default if empty)"
+    )
     model = models.CharField(max_length=100)  # gemini-2.5-flash, gpt-4, etc.
     provider = models.CharField(
         max_length=20,
@@ -66,6 +82,7 @@ class Bot(models.Model):
     temperature = models.FloatField(default=0.7)
     system_instruction = models.TextField(blank=True)
     thinking_budget = models.IntegerField(null=True, blank=True)  # For Gemini thinking models
+    rag_enabled = models.BooleanField(default=True, help_text="Enable RAG (knowledge base) for this bot")
     telegram_token = models.CharField(max_length=500, blank=True)  # Encrypted token (stored longer)
     webhook_secret = models.CharField(max_length=256, blank=True)  # Secret token for webhook validation
     avatar = models.CharField(max_length=200, blank=True)  # Emoji or URL
@@ -87,6 +104,7 @@ class Bot(models.Model):
             models.Index(fields=['owner', 'status']),
             models.Index(fields=['created_at']),
             models.Index(fields=['status']),
+            models.Index(fields=['delivery_mode']),
         ]
     
     def __str__(self):
@@ -94,7 +112,65 @@ class Bot(models.Model):
     
     def __repr__(self):
         return f"<Bot: {self.name} (id={self.id})>"
-    
+
+    def clean(self):
+        """
+        Validate Telegram bot token format before saving.
+
+        Telegram bot tokens format: bot_id:secret
+        - bot_id: 9-10 digits (unique bot identifier from Telegram)
+        - secret: 35 characters (secret part)
+        - Total length: 46 characters
+
+        Example: 123456789:ABCDefGhIJKlmNoPQRsTUVwxyZ
+        """
+        from django.core.exceptions import ValidationError
+        import re
+
+        # Skip validation if token is empty or already encrypted
+        if not self.telegram_token:
+            return
+
+        # Check if already encrypted (Fernet prefix)
+        if self.telegram_token.startswith('gAAAAAB'):
+            return
+
+        # Validate token format
+        token = self.telegram_token.strip()
+
+        # Check basic format: should contain exactly one colon
+        if token.count(':') != 1:
+            raise ValidationError({
+                'telegram_token': 'Invalid token format. Token must be in format: bot_id:secret'
+            })
+
+        # Split and validate parts
+        try:
+            bot_id, secret = token.split(':')
+
+            # bot_id: 9-10 digits
+            if not bot_id.isdigit() or len(bot_id) < 9 or len(bot_id) > 10:
+                raise ValidationError({
+                    'telegram_token': 'Invalid bot ID. Must be 9-10 digits.'
+                })
+
+            # secret: should be 35 characters
+            if len(secret) != 35:
+                raise ValidationError({
+                    'telegram_token': 'Invalid secret length. Must be exactly 35 characters.'
+                })
+
+            # Total length check
+            if len(token) != 46:
+                raise ValidationError({
+                    'telegram_token': f'Invalid token length. Must be 46 characters, got {len(token)}.'
+                })
+
+        except ValueError as e:
+            raise ValidationError({
+                'telegram_token': f'Invalid token format: {e}'
+            })
+
     @property
     def conversations_count(self):
         """Return the number of conversations for this bot."""

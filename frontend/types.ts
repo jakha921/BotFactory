@@ -5,6 +5,11 @@ export enum BotStatus {
   DRAFT = 'draft',
 }
 
+export enum DeliveryMode {
+  POLLING = 'polling',
+  WEBHOOK = 'webhook',
+}
+
 export interface InlineKeyboardButton {
   text: string;
   callback_data?: string;
@@ -67,13 +72,17 @@ export interface Bot {
   temperature: number;
   systemInstruction: string;
   thinkingBudget?: number; // Added for Gemini 3.0 / 2.5 thinking models
+  rag_enabled?: boolean; // Enable/disable RAG (knowledge base) for this bot
   telegramToken?: string;
   avatar?: string; // Emoji or URL
   createdAt: string;
+  updatedAt?: string;
   uiConfig?: UIConfig; // UI configuration for Telegram bot
   defaultInlineKeyboard?: InlineKeyboardButton[][];
   welcomeMessage?: string;
   helpMessage?: string;
+  deliveryMode: DeliveryMode; // How Telegram updates are delivered
+  webhookUrl: string; // Custom webhook URL (optional)
 }
 
 export interface User {
@@ -179,6 +188,14 @@ export interface Document {
   botId: string; // Link to specific bot
 }
 
+export interface DocumentChunk {
+  id: string;
+  document: string; // Document ID
+  text: string;
+  embedding: number[] | null; // Vector embedding (768 dimensions)
+  created_at: string;
+}
+
 export interface TextSnippet {
   id: string;
   title: string;
@@ -215,7 +232,8 @@ export type View =
   | 'knowledge'
   | 'users'
   | 'subscription'
-  | 'monitoring';
+  | 'monitoring'
+  | 'analytics';
 
 // Dashboard Types
 export interface DashboardStats {
@@ -273,4 +291,27 @@ export interface NotificationPreferences {
   email_alerts: boolean;
   push_notifications: boolean;
   weekly_digest: boolean;
+}
+
+// Command Types
+export enum ResponseType {
+  TEXT = 'text',
+  AI = 'ai',
+  FORM = 'form',
+  MENU = 'menu',
+}
+
+export interface BotCommand {
+  id: string;
+  bot: string; // Bot UUID
+  name: string; // Command name without /
+  description: string;
+  response_type: ResponseType;
+  text_response: string;
+  ai_prompt_override: string;
+  form_id: string;
+  menu_config: any; // JSON field for menu configuration
+  is_active: boolean;
+  priority: number;
+  created_at: string;
 }

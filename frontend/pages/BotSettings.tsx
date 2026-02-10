@@ -15,6 +15,7 @@ import {
   Trash2,
   Copy,
   Check,
+  Terminal,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/Button';
@@ -23,7 +24,15 @@ import { Textarea } from '../components/ui/Textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { Tabs } from '../components/ui/Tabs';
 import { Label } from '../components/ui/Label';
-import { Bot as BotType, BotStatus, UIConfig, InlineKeyboardButton } from '../types';
+import {
+  Bot as BotType,
+  BotStatus,
+  DeliveryMode,
+  UIConfig,
+  InlineKeyboardButton,
+  BotCommand,
+  ResponseType,
+} from '../types';
 import { api } from '../services/api';
 import { validateBot, getFieldErrors } from '../schemas/botSchema';
 import { KeyboardEditor } from '../components/ui/KeyboardEditor';
@@ -40,6 +49,7 @@ const TABS = [
   { id: 'general', label: 'General' },
   { id: 'model', label: 'Model & AI' },
   { id: 'knowledge', label: 'Knowledge Base' },
+  { id: 'commands', label: 'Commands' },
   { id: 'integrations', label: 'Integrations' },
   { id: 'ui', label: 'UI & Buttons' },
 ];
@@ -79,6 +89,26 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
   const [newAPIKey, setNewAPIKey] = useState<string | null>(null);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
 
+  // Webhook State
+  const [webhookInfo, setWebhookInfo] = useState<{
+    delivery_mode: DeliveryMode;
+    webhook_url: string | null;
+    has_custom_url: boolean;
+    webhook_secret_set: boolean;
+    telegram_webhook_info: {
+      url: string;
+      has_custom_certificate: boolean;
+      pending_update_count: number;
+      last_error_date: number | null;
+      last_error_message: string | null;
+      max_connections: number | null;
+      allowed_updates: string[] | null;
+    } | null;
+  } | null>(null);
+  const [isLoadingWebhook, setIsLoadingWebhook] = useState(false);
+  const [isSettingWebhook, setIsSettingWebhook] = useState(false);
+  const [isDeletingWebhook, setIsDeletingWebhook] = useState(false);
+
   // UI Config State
   const [uiConfig, setUIConfig] = useState<UIConfig>({
     inline_keyboards: {},
@@ -87,6 +117,27 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
     help_message: '',
     default_inline_keyboard: [],
   });
+
+  // Commands State
+  const [commands, setCommands] = useState<BotCommand[]>([]);
+  const [isLoadingCommands, setIsLoadingCommands] = useState(false);
+  const [isSavingCommand, setIsSavingCommand] = useState(false);
+  const [editingCommand, setEditingCommand] = useState<Partial<BotCommand> | null>(null);
+
+  // AI Models State
+  const [aiModels, setAiModels] = useState<Array<{
+    id: string;
+    provider: string;
+    provider_display: string;
+    name: string;
+    display_name: string;
+    model_id: string;
+    capability: string;
+    supports_thinking: boolean;
+    supports_vision: boolean;
+    is_default: boolean;
+  }>>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
 
   // Form State
   const [formData, setFormData] = useState<Partial<BotType>>({
@@ -99,6 +150,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
     systemInstruction: '',
     telegramToken: '',
     status: BotStatus.DRAFT,
+    rag_enabled: true,
   });
 
   // Load bot status periodically
@@ -175,6 +227,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
         systemInstruction: '',
         telegramToken: '',
         status: BotStatus.DRAFT,
+        rag_enabled: true,
       });
       setUIConfig({
         inline_keyboards: {},
@@ -184,6 +237,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
         default_inline_keyboard: [],
       });
       setApiKeys([]);
+      setCommands([]);
     }
   }, [botId]);
 
@@ -191,8 +245,49 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
   useEffect(() => {
     if (activeTab === 'integrations' && botId && botId !== 'new') {
       loadAPIKeys();
+      loadWebhookInfo();
     }
   }, [activeTab, botId]);
+
+  // Load commands when commands tab is active
+  useEffect(() => {
+    if (activeTab === 'commands' && botId && botId !== 'new') {
+      loadCommands();
+    }
+  }, [activeTab, botId]);
+
+  // Load AI models on mount
+  useEffect(() => {
+    const loadModels = async () => {
+      try {
+        setIsLoadingModels(true);
+        const response = await api.ai.getModels();
+        setAiModels(response.models || []);
+      } catch (error) {
+        console.error('[BotSettings] Failed to load AI models:', error);
+        // Non-critical error, continue without models list
+      } finally {
+        setIsLoadingModels(false);
+      }
+    };
+    loadModels();
+  }, []);
+
+  // Update model when provider changes
+  useEffect(() => {
+    if (!aiModels.length) return;
+
+    const providerModels = aiModels.filter(m => m.provider === formData.provider);
+    if (providerModels.length > 0) {
+      // Check if current model is valid for the new provider
+      const currentModelValid = providerModels.some(m => m.model_id === formData.model);
+      if (!currentModelValid) {
+        // Set to default model for this provider, or first available
+        const defaultModel = providerModels.find(m => m.is_default) || providerModels[0];
+        handleChange('model', defaultModel.model_id);
+      }
+    }
+  }, [formData.provider, aiModels]);
 
   const loadAPIKeys = async () => {
     if (!botId || botId === 'new') return;
@@ -254,6 +349,147 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
     setCopiedKeyId(keyId);
     toast.success('API key copied to clipboard');
     setTimeout(() => setCopiedKeyId(null), 2000);
+  };
+
+  // Webhook functions
+  const loadWebhookInfo = async () => {
+    if (!botId || botId === 'new') return;
+    setIsLoadingWebhook(true);
+    try {
+      const info = await api.bots.getWebhookInfo(botId);
+      setWebhookInfo(info);
+    } catch (error: any) {
+      console.error('[BotSettings] Failed to load webhook info:', error);
+      toast.error(error?.message || 'Failed to load webhook info');
+    } finally {
+      setIsLoadingWebhook(false);
+    }
+  };
+
+  const handleSetWebhook = async () => {
+    if (!botId || botId === 'new') {
+      toast.error('Please save the bot first');
+      return;
+    }
+
+    setIsSettingWebhook(true);
+    try {
+      const result = await api.bots.setWebhook(botId);
+      if (result.success) {
+        toast.success(`Webhook mode enabled. URL: ${result.webhook_url}`);
+        await loadWebhookInfo();
+      } else {
+        toast.error(result.error || 'Failed to enable webhook mode');
+      }
+    } catch (error: any) {
+      console.error('[BotSettings] Failed to set webhook:', error);
+      toast.error(error?.message || 'Failed to enable webhook mode');
+    } finally {
+      setIsSettingWebhook(false);
+    }
+  };
+
+  const handleDeleteWebhook = async () => {
+    if (!botId || botId === 'new') {
+      toast.error('Please save the bot first');
+      return;
+    }
+
+    if (!confirm('Are you sure you want to disable webhook mode? The bot will switch to polling mode.')) {
+      return;
+    }
+
+    setIsDeletingWebhook(true);
+    try {
+      const result = await api.bots.deleteWebhook(botId);
+      if (result.success) {
+        toast.success(result.message || 'Webhook mode disabled. Bot will use polling mode.');
+        await loadWebhookInfo();
+        // Also update local bot state
+        handleChange('deliveryMode', DeliveryMode.POLLING);
+      } else {
+        toast.error('Failed to disable webhook mode');
+      }
+    } catch (error: any) {
+      console.error('[BotSettings] Failed to delete webhook:', error);
+      toast.error(error?.message || 'Failed to disable webhook mode');
+    } finally {
+      setIsDeletingWebhook(false);
+    }
+  };
+
+  const loadCommands = async () => {
+    if (!botId || botId === 'new') return;
+    setIsLoadingCommands(true);
+    try {
+      const cmds = await api.commands.list(botId);
+      setCommands(cmds);
+    } catch (error: any) {
+      console.error('[BotSettings] Failed to load commands:', error);
+      toast.error(error?.message || 'Failed to load commands');
+    } finally {
+      setIsLoadingCommands(false);
+    }
+  };
+
+  const handleSaveCommand = async () => {
+    if (!botId || botId === 'new') {
+      toast.error('Please save the bot first');
+      return;
+    }
+
+    if (!editingCommand?.name || !editingCommand.name.trim()) {
+      toast.error('Command name is required');
+      return;
+    }
+
+    // Remove / prefix if present
+    const commandName = editingCommand.name.replace(/^\//, '');
+
+    if (!/^[a-z0-9_]+$/.test(commandName)) {
+      toast.error('Command name must contain only lowercase letters, numbers, and underscores');
+      return;
+    }
+
+    setIsSavingCommand(true);
+    try {
+      const commandData = {
+        ...editingCommand,
+        name: commandName,
+        bot: botId,
+      };
+
+      if (editingCommand.id) {
+        await api.commands.update(editingCommand.id, commandData);
+        toast.success('Command updated successfully');
+      } else {
+        await api.commands.create(commandData as any);
+        toast.success('Command created successfully');
+      }
+
+      setEditingCommand(null);
+      await loadCommands();
+    } catch (error: any) {
+      console.error('[BotSettings] Failed to save command:', error);
+      toast.error(error?.message || 'Failed to save command');
+    } finally {
+      setIsSavingCommand(false);
+    }
+  };
+
+  const handleDeleteCommand = async (commandId: string) => {
+    if (!confirm('Are you sure you want to delete this command?')) {
+      return;
+    }
+
+    try {
+      await api.commands.delete(commandId);
+      await loadCommands();
+      toast.success('Command deleted successfully');
+    } catch (error: any) {
+      console.error('[BotSettings] Failed to delete command:', error);
+      toast.error(error?.message || 'Failed to delete command');
+    }
   };
 
   const handleChange = (field: keyof BotType, value: any) => {
@@ -570,7 +806,283 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
 
         {/* KNOWLEDGE TAB */}
         {activeTab === 'knowledge' && botId && botId !== 'new' && (
-          <KnowledgeSettings botId={botId} />
+          <div className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-300">
+            {/* RAG Settings */}
+            <Card className="border-black/5 dark:border-white/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Brain className="w-5 h-5 text-emerald-500" />
+                  RAG Settings
+                </CardTitle>
+                <CardDescription>
+                  Configure how your bot uses the knowledge base for responses.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900/50 border border-black/5 dark:border-white/5 rounded-lg">
+                  <div className="flex-1">
+                    <Label htmlFor="rag-enabled" className="text-base font-medium">
+                      Enable Knowledge Base (RAG)
+                    </Label>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                      When enabled, your bot will search uploaded documents and text snippets to provide more accurate, context-aware responses.
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      id="rag-enabled"
+                      className="sr-only peer"
+                      checked={formData.rag_enabled ?? true}
+                      onChange={(e) => handleChange('rag_enabled', e.target.checked)}
+                    />
+                    <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                  </label>
+                </div>
+
+                {formData.rag_enabled !== false && (
+                  <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                    <p className="text-sm text-blue-700 dark:text-blue-400">
+                      <strong>Active:</strong> Your bot will use uploaded documents and text snippets to enhance responses.
+                    </p>
+                  </div>
+                )}
+
+                {formData.rag_enabled === false && (
+                  <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                    <p className="text-sm text-amber-700 dark:text-amber-400">
+                      <strong>Disabled:</strong> Your bot will rely only on its training data and system instructions.
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <KnowledgeSettings botId={botId} />
+          </div>
+        )}
+
+        {/* COMMANDS TAB */}
+        {activeTab === 'commands' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-300">
+            <Card className="border-black/5 dark:border-white/5">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Terminal className="w-5 h-5 text-purple-500" />
+                      Bot Commands
+                    </CardTitle>
+                    <CardDescription>
+                      Configure dynamic bot commands that users can trigger.
+                    </CardDescription>
+                  </div>
+                  <Button
+                    onClick={() => setEditingCommand({
+                      name: '',
+                      description: '',
+                      response_type: ResponseType.TEXT,
+                      text_response: '',
+                      ai_prompt_override: '',
+                      form_id: '',
+                      menu_config: [],
+                      is_active: true,
+                      priority: 0,
+                    })}
+                    icon={<Plus className="w-4 h-4" />}
+                    disabled={!botId || botId === 'new'}
+                  >
+                    Add Command
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {isLoadingCommands ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+                  </div>
+                ) : commands.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                    <Terminal className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                    <p>No commands configured yet</p>
+                    <p className="text-sm mt-1">Create commands to let users interact with your bot</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {commands.map((command) => (
+                      <div
+                        key={command.id}
+                        className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900/50 border border-black/5 dark:border-white/5 rounded-lg hover:border-purple-200 dark:hover:border-purple-800 transition-colors"
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <code className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded text-sm font-mono">
+                              /{command.name}
+                            </code>
+                            {command.is_active ? (
+                              <span className="px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">
+                                Active
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded">
+                                Inactive
+                              </span>
+                            )}
+                            <span className="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded capitalize">
+                              {command.response_type}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            {command.description || 'No description'}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="icon"
+                            size="sm"
+                            onClick={() => setEditingCommand(command)}
+                            className="text-gray-600 dark:text-gray-400 hover:text-primary"
+                          >
+                            <Settings2 className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="icon"
+                            size="sm"
+                            onClick={() => handleDeleteCommand(command.id)}
+                            className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Edit Command Modal */}
+            {editingCommand && (
+              <Card className="border-purple-200 dark:border-purple-800">
+                <CardHeader>
+                  <CardTitle className="flex items-center justify-between">
+                    <span>{editingCommand.id ? 'Edit Command' : 'New Command'}</span>
+                    <Button
+                      variant="icon"
+                      size="sm"
+                      onClick={() => setEditingCommand(null)}
+                    >
+                      ✕
+                    </Button>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Input
+                      label="Command Name"
+                      placeholder="e.g., start, help, about"
+                      value={editingCommand.name?.replace(/^\//, '') || ''}
+                      onChange={(e) => setEditingCommand({ ...editingCommand, name: e.target.value })}
+                      helperText="Without / prefix. Use lowercase letters, numbers, and underscores only."
+                      required
+                    />
+                    <Input
+                      label="Priority"
+                      type="number"
+                      placeholder="0"
+                      value={editingCommand.priority || 0}
+                      onChange={(e) => setEditingCommand({ ...editingCommand, priority: parseInt(e.target.value) || 0 })}
+                      helperText="Higher priority commands are shown first"
+                    />
+                  </div>
+
+                  <Textarea
+                    label="Description"
+                    placeholder="Brief description of what this command does"
+                    value={editingCommand.description || ''}
+                    onChange={(e) => setEditingCommand({ ...editingCommand, description: e.target.value })}
+                    rows={2}
+                  />
+
+                  <div className="space-y-1.5">
+                    <Label>Response Type</Label>
+                    <select
+                      className="block w-full rounded-lg border px-3 py-2 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white dark:bg-white/5 border-black/10 dark:border-white/10 text-gray-900 dark:text-gray-100 sm:text-sm"
+                      value={editingCommand.response_type || ResponseType.TEXT}
+                      onChange={(e) => setEditingCommand({ ...editingCommand, response_type: e.target.value as ResponseType })}
+                    >
+                      <option value={ResponseType.TEXT}>Text - Static message</option>
+                      <option value={ResponseType.AI}>AI - AI-generated response</option>
+                      <option value={ResponseType.FORM}>Form - Multi-step form</option>
+                      <option value={ResponseType.MENU}>Menu - Inline keyboard</option>
+                    </select>
+                  </div>
+
+                  {editingCommand.response_type === ResponseType.TEXT && (
+                    <Textarea
+                      label="Text Response"
+                      placeholder="The message to send when this command is triggered"
+                      value={editingCommand.text_response || ''}
+                      onChange={(e) => setEditingCommand({ ...editingCommand, text_response: e.target.value })}
+                      rows={4}
+                      helperText="Supports plain text. Markdown formatting is available."
+                    />
+                  )}
+
+                  {editingCommand.response_type === ResponseType.AI && (
+                    <Textarea
+                      label="AI Prompt Override"
+                      placeholder="Override the default system instruction for this command"
+                      value={editingCommand.ai_prompt_override || ''}
+                      onChange={(e) => setEditingCommand({ ...editingCommand, ai_prompt_override: e.target.value })}
+                      rows={4}
+                      helperText="Leave empty to use the bot's default system instruction"
+                    />
+                  )}
+
+                  {editingCommand.response_type === ResponseType.FORM && (
+                    <Input
+                      label="Form ID"
+                      placeholder="e.g., feedback_form, survey"
+                      value={editingCommand.form_id || ''}
+                      onChange={(e) => setEditingCommand({ ...editingCommand, form_id: e.target.value })}
+                      helperText="The form identifier to trigger"
+                    />
+                  )}
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="command-active"
+                      checked={editingCommand.is_active ?? true}
+                      onChange={(e) => setEditingCommand({ ...editingCommand, is_active: e.target.checked })}
+                      className="rounded border-gray-300 text-primary focus:ring-primary"
+                    />
+                    <Label htmlFor="command-active" className="cursor-pointer">
+                      Active (command is available to users)
+                    </Label>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-4 border-t border-black/5 dark:border-white/5">
+                    <Button
+                      variant="secondary"
+                      onClick={() => setEditingCommand(null)}
+                      disabled={isSavingCommand}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={handleSaveCommand}
+                      isLoading={isSavingCommand}
+                      icon={<Save className="w-4 h-4" />}
+                    >
+                      {editingCommand.id ? 'Save Changes' : 'Create Command'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         )}
 
         {/* MODEL TAB */}
@@ -600,20 +1112,121 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
                   </div>
                   <div className="space-y-1.5">
                     <Label>Model Version</Label>
-                    <select
-                      className="block w-full rounded-lg border px-3 py-2 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white dark:bg-white/5 border-black/10 dark:border-white/10 text-gray-900 dark:text-gray-100 sm:text-sm"
-                      value={formData.model}
-                      onChange={(e) => handleChange('model', e.target.value)}
-                    >
-                      <option value="gemini-2.5-flash">Gemini 2.5 Flash (Fastest)</option>
-                      <option value="gemini-3-pro-preview">Gemini 3.0 Pro (Reasoning)</option>
-                      <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
-                    </select>
+                    {isLoadingModels ? (
+                      <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 py-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Loading models...
+                      </div>
+                    ) : (
+                      <select
+                        className="block w-full rounded-lg border px-3 py-2 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white dark:bg-white/5 border-black/10 dark:border-white/10 text-gray-900 dark:text-gray-100 sm:text-sm"
+                        value={formData.model}
+                        onChange={(e) => handleChange('model', e.target.value)}
+                      >
+                        {(() => {
+                          const providerModels = aiModels.filter(m => m.provider === formData.provider);
+                          if (providerModels.length === 0) {
+                            return (
+                              <option value={formData.model} disabled>
+                                {formData.model || 'Select a model'}
+                              </option>
+                            );
+                          }
+                          return providerModels.map((model) => (
+                            <option key={model.model_id} value={model.model_id}>
+                              {model.display_name} {model.supports_thinking && '🧠'} {model.supports_vision && '👁️'}
+                            </option>
+                          ));
+                        })()}
+                      </select>
+                    )}
                   </div>
                 </div>
 
+                {/* Model Info Display */}
+                {(() => {
+                  const selectedModel = aiModels.find(m => m.model_id === formData.model);
+                  if (!selectedModel) return null;
+
+                  // Get model cost info from factory
+                  const modelCostInfo = (() => {
+                    if (selectedModel.provider === 'gemini') {
+                      const geminiModels = {
+                        'gemini-2.5-flash': { input: 0.000075, output: 0.0003 },
+                        'gemini-2.5-flash-lite': { input: 0.0000375, output: 0.00015 },
+                        'gemini-3-pro-preview': { input: 0.000125, output: 0.0005 },
+                        'gemini-1.5-pro': { input: 0.00175, output: 0.0021 },
+                        'gemini-1.5-flash': { input: 0.000075, output: 0.00015 },
+                      };
+                      return geminiModels[selectedModel.model_id as keyof typeof geminiModels];
+                    } else if (selectedModel.provider === 'openai') {
+                      const openaiModels = {
+                        'gpt-4o': { input: 0.0025, output: 0.01 },
+                        'gpt-4o-mini': { input: 0.00015, output: 0.0006 },
+                        'gpt-4-turbo': { input: 0.01, output: 0.03 },
+                        'gpt-4': { input: 0.03, output: 0.06 },
+                        'gpt-3.5-turbo': { input: 0.0005, output: 0.0015 },
+                      };
+                      return openaiModels[selectedModel.model_id as keyof typeof openaiModels];
+                    } else if (selectedModel.provider === 'anthropic') {
+                      const anthropicModels = {
+                        'claude-4-opus-20250114': { input: 0.015, output: 0.075 },
+                        'claude-3.5-sonnet-20241022': { input: 0.003, output: 0.015 },
+                        'claude-3.5-sonnet-20240620': { input: 0.003, output: 0.015 },
+                        'claude-3-haiku-20240307': { input: 0.00025, output: 0.00125 },
+                        'claude-3-opus-20240229': { input: 0.015, output: 0.075 },
+                      };
+                      return anthropicModels[selectedModel.model_id as keyof typeof anthropicModels];
+                    }
+                    return null;
+                  })();
+
+                  return (
+                    <div className="p-4 bg-gray-50 dark:bg-gray-900/50 border border-black/5 dark:border-white/5 rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                          {selectedModel.display_name}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {selectedModel.supports_thinking && (
+                            <span className="px-2 py-0.5 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full flex items-center gap-1">
+                              <Brain className="w-3 h-3" />
+                              Thinking
+                            </span>
+                          )}
+                          {selectedModel.supports_vision && (
+                            <span className="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full">
+                              Vision
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {modelCostInfo && (
+                        <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
+                          <div className="flex justify-between">
+                            <span>Input:</span>
+                            <span className="font-mono">${modelCostInfo.input.toFixed(5)}/1K tokens</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Output:</span>
+                            <span className="font-mono">${modelCostInfo.output.toFixed(5)}/1K tokens</span>
+                          </div>
+                          <div className="pt-1 border-t border-black/5 dark:border-white/5 mt-2">
+                            <span className="text-gray-500">
+                              Est. cost per 1K tokens: ${((modelCostInfo.input + modelCostInfo.output) / 2).toFixed(5)}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* Thinking Budget Control - Only for Supported Models */}
-                {formData.model?.includes('gemini-3-pro') && (
+                {(() => {
+                  const selectedModel = aiModels.find(m => m.model_id === formData.model);
+                  return selectedModel?.supports_thinking;
+                })() && (
                   <div className="space-y-3 p-4 bg-purple-50 dark:bg-purple-900/10 border border-purple-100 dark:border-purple-900/30 rounded-lg animate-in zoom-in-95">
                     <div className="flex justify-between items-center">
                       <Label className="flex items-center gap-2 text-purple-900 dark:text-purple-200 mb-0">
@@ -625,7 +1238,7 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
                       </span>
                     </div>
                     <p className="text-xs text-purple-600 dark:text-purple-400">
-                      Allocate tokens for advanced reasoning. Max 32,768 for Gemini 3.0 Pro.
+                      Allocate tokens for advanced reasoning. Higher values enable deeper reasoning but increase response time.
                     </p>
                     <input
                       type="range"
@@ -1026,6 +1639,162 @@ export const BotSettings: React.FC<BotSettingsProps> = ({ botId, onBack }) => {
                       <strong>Usage:</strong> Include the API key in the <code className="px-1 py-0.5 bg-blue-100 dark:bg-blue-900/30 rounded">X-API-Key</code> header when making requests to <code className="px-1 py-0.5 bg-blue-100 dark:bg-blue-900/30 rounded">/api/v1/public/chat/</code>
                     </p>
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Webhook Management Section */}
+            {botId && botId !== 'new' && (
+              <Card className="border-black/5 dark:border-white/5">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Terminal className="w-5 h-5 text-orange-500" />
+                    Webhook Settings
+                  </CardTitle>
+                  <CardDescription>
+                    Configure how your bot receives messages from Telegram.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {isLoadingWebhook ? (
+                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Loading webhook info...
+                    </div>
+                  ) : webhookInfo ? (
+                    <>
+                      {/* Current Mode Display */}
+                      <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900/50 border border-black/5 dark:border-white/5 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                            webhookInfo.delivery_mode === 'webhook'
+                              ? 'bg-green-100 dark:bg-green-900/30'
+                              : 'bg-blue-100 dark:bg-blue-900/30'
+                          }`}>
+                            {webhookInfo.delivery_mode === 'webhook' ? (
+                              <Webhook className="w-5 h-5 text-green-600 dark:text-green-400" />
+                            ) : (
+                              <Terminal className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                            )}
+                          </div>
+                          <div>
+                            <div className="font-medium text-gray-900 dark:text-gray-100">
+                              {webhookInfo.delivery_mode === 'webhook' ? 'Webhook Mode' : 'Polling Mode'}
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                              {webhookInfo.delivery_mode === 'webhook'
+                                ? 'Messages delivered via webhook'
+                                : 'Bot service polls for updates'
+                              }
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          {formData.status === BotStatus.ACTIVE && (
+                            <>
+                              {webhookInfo.delivery_mode === 'webhook' ? (
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={handleDeleteWebhook}
+                                  isLoading={isDeletingWebhook}
+                                  disabled={isDeletingWebhook}
+                                >
+                                  Switch to Polling
+                                </Button>
+                              ) : (
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  onClick={handleSetWebhook}
+                                  isLoading={isSettingWebhook}
+                                  disabled={isSettingWebhook}
+                                >
+                                  Enable Webhook
+                                </Button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Webhook URL Info */}
+                      {webhookInfo.delivery_mode === 'webhook' && (
+                        <div className="space-y-4">
+                          <div>
+                            <Label>Webhook URL</Label>
+                            <div className="mt-1.5 p-3 bg-gray-100 dark:bg-gray-800 border border-black/10 dark:border-white/10 rounded-lg">
+                              <code className="text-xs break-all">
+                                {webhookInfo.webhook_url || 'Using default URL'}
+                              </code>
+                            </div>
+                          </div>
+
+                          {webhookInfo.telegram_webhook_info && (
+                            <div className="p-4 bg-gray-50 dark:bg-gray-900/50 border border-black/5 dark:border-white/5 rounded-lg space-y-2">
+                              <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                                Telegram Webhook Status
+                              </h4>
+                              <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
+                                <div className="flex justify-between">
+                                  <span>Status:</span>
+                                  <span className={webhookInfo.telegram_webhook_info.url ? 'text-green-600 dark:text-green-400' : 'text-gray-500'}>
+                                    {webhookInfo.telegram_webhook_info.url ? 'Connected' : 'Not connected'}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span>Pending updates:</span>
+                                  <span className={webhookInfo.telegram_webhook_info.pending_update_count > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'}>
+                                    {webhookInfo.telegram_webhook_info.pending_update_count}
+                                  </span>
+                                </div>
+                                {webhookInfo.telegram_webhook_info.last_error_message && (
+                                  <div className="text-red-600 dark:text-red-400">
+                                    Error: {webhookInfo.telegram_webhook_info.last_error_message}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {webhookInfo.has_custom_url && (
+                            <div className="p-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+                              <p className="text-sm text-purple-700 dark:text-purple-400">
+                                <strong>Custom URL:</strong> This bot uses a custom webhook URL.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Polling Mode Info */}
+                      {webhookInfo.delivery_mode === 'polling' && (
+                        <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                          <p className="text-sm text-blue-700 dark:text-blue-400">
+                            <strong>Polling Mode:</strong> Bot service polls Telegram for updates.
+                            Requires the bot service to be running. Use this for development or
+                            if webhook mode is not available.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Info Card */}
+                      <div className="p-4 bg-gray-50 dark:bg-gray-900/50 border border-black/5 dark:border-white/5 rounded-lg">
+                        <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
+                          Webhook vs Polling
+                        </h4>
+                        <div className="space-y-1 text-xs text-gray-600 dark:text-gray-400">
+                          <p>• <strong>Webhook:</strong> Instant message delivery, better for production, requires HTTPS</p>
+                          <p>• <strong>Polling:</strong> Bot polls for updates, works everywhere, uses more resources</p>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-center py-4 text-gray-500 dark:text-gray-400">
+                      Unable to load webhook information
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}

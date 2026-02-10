@@ -292,3 +292,23 @@ CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes
 
 
+# Webhook Monitoring and Alerting Settings
+# Error rate threshold (0.1 = 10%) for triggering alerts
+WEBHOOK_ERROR_RATE_THRESHOLD = env.float('WEBHOOK_ERROR_RATE_THRESHOLD', default=0.1)
+
+# Admin email for webhook alerts
+ADMIN_EMAIL = env('ADMIN_EMAIL', default='admin@botfactory.com')
+
+# Default from email for alerts
+DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default='noreply@botfactory.com')
+
+# Webhook event retention period (days)
+WEBHOOK_EVENT_RETENTION_DAYS = env.int('WEBHOOK_EVENT_RETENTION_DAYS', default=7)
+
+# Enable webhook health alerts
+WEBHOOK_ALERTS_ENABLED = env.bool('WEBHOOK_ALERTS_ENABLED', default=True)
+
+# Webhook processing timeout (seconds)
+WEBHOOK_PROCESSING_TIMEOUT = env.int('WEBHOOK_PROCESSING_TIMEOUT', default=30)
+
+

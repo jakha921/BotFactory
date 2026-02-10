@@ -5,7 +5,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
 from apps.telegram.views import TelegramUserViewSet, webhook_view
-from apps.telegram.webhook_views import TelegramWebhookView
+from apps.telegram.webhook_views import telegram_webhook_by_id
 
 app_name = 'telegram'
 
@@ -16,4 +16,6 @@ urlpatterns = [
     path('', include(router.urls)),
     # Update status endpoint (using detail action)
     path('users/<uuid:pk>/status/', TelegramUserViewSet.as_view({'post': 'update_status'}), name='user-status'),
+    # Webhook endpoint for Telegram updates (using bot_id)
+    path('webhook/<uuid:bot_id>/', telegram_webhook_by_id, name='webhook-by-id'),
 ]

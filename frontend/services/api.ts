@@ -4,6 +4,7 @@ import {
   KPI,
   TelegramUser,
   Document,
+  DocumentChunk,
   TextSnippet,
   ChatSession,
   ChatMessage,
@@ -12,6 +13,7 @@ import {
   ApiError,
   UIConfig,
   InlineKeyboardButton,
+  BotCommand,
 } from '../types';
 import { getAccessToken } from './auth';
 
@@ -384,6 +386,63 @@ export const api = {
     deleteAPIKey: async (botId: string, apiKeyId: string): Promise<void> => {
       return client.delete<void>(`bots/${botId}/api-keys/${apiKeyId}/`).then(() => undefined);
     },
+
+    // Webhook management endpoints
+    setWebhook: async (id: string, customUrl?: string): Promise<{
+      success: boolean;
+      webhook_url: string;
+      delivery_mode: 'polling' | 'webhook';
+      telegram_response: Record<string, unknown>;
+      error?: string;
+    }> => {
+      return client.post<{
+        success: boolean;
+        webhook_url: string;
+        delivery_mode: 'polling' | 'webhook';
+        telegram_response: Record<string, unknown>;
+        error?: string;
+      }>(`bots/${id}/set-webhook/`, customUrl ? { webhook_url: customUrl } : {});
+    },
+
+    deleteWebhook: async (id: string): Promise<{
+      success: boolean;
+      delivery_mode: 'polling' | 'webhook';
+      telegram_response: Record<string, unknown>;
+      message: string;
+      warning?: string;
+    }> => {
+      return client.post<{
+        success: boolean;
+        delivery_mode: 'polling' | 'webhook';
+        telegram_response: Record<string, unknown>;
+        message: string;
+        warning?: string;
+      }>(`bots/${id}/delete-webhook/`, {});
+    },
+
+    getWebhookInfo: async (id: string): Promise<{
+      delivery_mode: 'polling' | 'webhook';
+      webhook_url: string | null;
+      has_custom_url: boolean;
+      webhook_secret_set: boolean;
+      telegram_webhook_info: {
+        url: string;
+        has_custom_certificate: boolean;
+        pending_update_count: number;
+        last_error_date: number | null;
+        last_error_message: string | null;
+        max_connections: number | null;
+        allowed_updates: string[] | null;
+      } | null;
+    }> => {
+      return client.get<{
+        delivery_mode: 'polling' | 'webhook';
+        webhook_url: string | null;
+        has_custom_url: boolean;
+        webhook_secret_set: boolean;
+        telegram_webhook_info: Record<string, unknown> | null;
+      }>(`bots/${id}/webhook-info/`);
+    },
   },
 
   stats: {
@@ -421,6 +480,26 @@ export const api = {
           status: 'success' | 'warning' | 'info' | string;
         }>
       >('stats/activity/'),
+
+    tokens: (period: string): Promise<{
+      summary: {
+        input_tokens: number;
+        output_tokens: number;
+        total_tokens: number;
+        estimated_cost: string;
+      };
+      daily: Array<{ date: string; tokens: number }>;
+    }> =>
+      client.get<any>(`stats/tokens/?period=${encodeURIComponent(period)}`),
+
+    retention: (): Promise<Array<{
+      cohort: string;
+      total_users: number;
+      day_1: number;
+      day_7: number;
+      day_30: number;
+    }>> =>
+      client.get<any[]>('stats/retention/'),
   },
 
   users: {
@@ -446,6 +525,20 @@ export const api = {
 
     deleteDocument: (id: string): Promise<void> =>
       client.delete<void>(`documents/${id}/`).then(() => undefined),
+
+    // Document chunks API
+    chunks: async (documentId: string): Promise<DocumentChunk[]> => {
+      const response = await client.get<{ results: DocumentChunk[] } | DocumentChunk[]>(`documents/${documentId}/chunks/`);
+      return getPaginatedResults(response);
+    },
+
+    updateChunk: (chunkId: string, text: string): Promise<DocumentChunk> => {
+      return client.patch<DocumentChunk, { text: string }>(`chunks/${chunkId}/`, { text });
+    },
+
+    regenerateChunk: (chunkId: string): Promise<{ success: boolean; message: string }> => {
+      return client.post<{ success: boolean; message: string }, {}>(`chunks/${chunkId}/regenerate/`, {});
+    },
 
     snippets: async (botId: string): Promise<TextSnippet[]> => {
       // Backend expects bot_id as query parameter
@@ -659,5 +752,34 @@ export const api = {
   subscription: {
     usage: (): Promise<unknown> =>
       client.get<unknown>('subscription/'),
+  },
+
+  commands: {
+    list: async (botId: string): Promise<BotCommand[]> => {
+      const response = await client.get<{ results: BotCommand[] } | BotCommand[]>(`commands/?bot=${botId}`);
+      if (Array.isArray(response)) {
+        return response;
+      }
+      if (response && Array.isArray(response.results)) {
+        return response.results;
+      }
+      return [];
+    },
+
+    get: async (id: string): Promise<BotCommand> => {
+      return client.get<BotCommand>(`commands/${id}/`);
+    },
+
+    create: async (command: Omit<BotCommand, 'id' | 'created_at'>): Promise<BotCommand> => {
+      return client.post<BotCommand, Omit<BotCommand, 'id' | 'created_at'>>('commands/', command);
+    },
+
+    update: async (id: string, command: Partial<BotCommand>): Promise<BotCommand> => {
+      return client.patch<BotCommand, Partial<BotCommand>>(`commands/${id}/`, command);
+    },
+
+    delete: async (id: string): Promise<void> => {
+      return client.delete<void>(`commands/${id}/`).then(() => undefined);
+    },
   },
 };

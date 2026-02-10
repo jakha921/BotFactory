@@ -4,7 +4,9 @@ BotViewSet for CRUD operations on bots.
 """
 import logging
 import requests
+import secrets
 from django.utils import timezone
+from django.conf import settings
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -38,8 +40,13 @@ class BotViewSet(OwnerFilterMixin, OwnerCreateMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
     
     def get_queryset(self):
-        """Filter bots by current user."""
-        return Bot.objects.filter(owner=self.request.user)
+        """
+        Filter bots by current user with optimization.
+
+        Uses select_related to avoid N+1 queries when accessing
+        owner.email in BotSerializer.
+        """
+        return Bot.objects.filter(owner=self.request.user).select_related('owner')
     
     def get_serializer_class(self):
         """Use different serializers for different actions."""
@@ -462,6 +469,212 @@ class BotViewSet(OwnerFilterMixin, OwnerCreateMixin, viewsets.ModelViewSet):
     
     @action(detail=True, methods=['delete'], url_path='api-keys/(?P<api_key_id>[^/.]+)')
     def delete_api_key(self, request, pk=None, api_key_id=None):
+        """
+        Delete an API key.
+
+        DELETE /api/v1/bots/{id}/api-keys/{api_key_id}/
+        """
+        bot = self.get_object()
+
+        try:
+            api_key = BotAPIKey.objects.get(id=api_key_id, bot=bot)
+            api_key.delete()
+            return Response({
+                'message': 'API key deleted successfully'
+            }, status=status.HTTP_200_OK)
+        except BotAPIKey.DoesNotExist:
+            return Response(
+                {'error': 'API key not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    @action(detail=True, methods=['post'], url_path='set-webhook')
+    def set_webhook(self, request, pk=None):
+        """
+        Enable webhook mode and register webhook with Telegram.
+
+        POST /api/v1/bots/{id}/set-webhook/
+
+        Body (optional):
+        {
+            "webhook_url": "https://custom-url.com/webhook"  // Optional, uses default if not provided
+        }
+
+        Returns:
+        {
+            "success": true/false,
+            "webhook_url": "...",
+            "delivery_mode": "webhook",
+            "telegram_response": {...}
+        }
+        """
+        bot = self.get_object()
+
+        if not bot.telegram_token:
+            return Response({
+                'success': False,
+                'error': 'Telegram token is not set for this bot'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get custom webhook URL from request (optional)
+        custom_url = request.data.get('webhook_url')
+        if custom_url:
+            bot.webhook_url = custom_url
+
+        # Build webhook URL
+        from django.conf import settings
+        if bot.webhook_url:
+            webhook_url = bot.webhook_url
+        else:
+            base_url = getattr(settings, 'WEBHOOK_BASE_URL', 'http://localhost:8000')
+            webhook_url = f"{base_url}/api/telegram/webhook/{bot.id}/"
+
+        # Generate webhook secret if not exists
+        import secrets
+        if not bot.webhook_secret:
+            bot.webhook_secret = secrets.token_urlsafe(32)
+
+        # Update delivery mode
+        bot.delivery_mode = 'webhook'
+        bot.save(update_fields=['webhook_secret', 'delivery_mode', 'webhook_url'])
+
+        # Register webhook with Telegram
+        telegram_api_url = f"https://api.telegram.org/bot{bot.decrypted_telegram_token}/setWebhook"
+
+        try:
+            response = requests.post(
+                telegram_api_url,
+                json={
+                    'url': webhook_url,
+                    'secret_token': bot.webhook_secret,
+                    'allowed_updates': ['message', 'callback_query']
+                },
+                timeout=10
+            )
+            result = response.json()
+
+            if result.get('ok'):
+                logger.info(f"Webhook registered for bot {bot.name}: {webhook_url}")
+                return Response({
+                    'success': True,
+                    'webhook_url': webhook_url,
+                    'delivery_mode': bot.delivery_mode,
+                    'telegram_response': result
+                }, status=status.HTTP_200_OK)
+            else:
+                # Rollback on failure
+                bot.delivery_mode = 'polling'
+                bot.save(update_fields=['delivery_mode'])
+                return Response({
+                    'success': False,
+                    'error': f"Failed to register webhook: {result.get('description', 'Unknown error')}",
+                    'telegram_response': result
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            # Rollback on exception
+            bot.delivery_mode = 'polling'
+            bot.save(update_fields=['delivery_mode'])
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'], url_path='delete-webhook')
+    def delete_webhook(self, request, pk=None):
+        """
+        Disable webhook mode and switch to polling.
+
+        POST /api/v1/bots/{id}/delete-webhook/
+
+        Returns:
+        {
+            "success": true/false,
+            "delivery_mode": "polling",
+            "telegram_response": {...}
+        }
+        """
+        bot = self.get_object()
+
+        if bot.delivery_mode != 'webhook':
+            return Response({
+                'success': True,
+                'message': 'Bot is not in webhook mode',
+                'delivery_mode': bot.delivery_mode
+            }, status=status.HTTP_200_OK)
+
+        # Delete webhook from Telegram
+        telegram_api_url = f"https://api.telegram.org/bot{bot.decrypted_telegram_token}/deleteWebhook"
+
+        try:
+            response = requests.post(telegram_api_url, timeout=10)
+            result = response.json()
+
+            # Update delivery mode to polling regardless of Telegram response
+            # (idempotent operation - safe to call multiple times)
+            bot.delivery_mode = 'polling'
+            bot.save(update_fields=['delivery_mode'])
+
+            if result.get('ok'):
+                logger.info(f"Webhook deleted for bot {bot.name}")
+            else:
+                logger.warning(f"Telegram returned error when deleting webhook for {bot.name}: {result}")
+
+            return Response({
+                'success': True,
+                'delivery_mode': bot.delivery_mode,
+                'telegram_response': result,
+                'message': 'Webhook mode disabled. Bot will use polling mode.'
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            # Still update delivery mode even if Telegram call fails
+            bot.delivery_mode = 'polling'
+            bot.save(update_fields=['delivery_mode'])
+
+            return Response({
+                'success': True,
+                'delivery_mode': bot.delivery_mode,
+                'warning': f'Could not confirm webhook deletion with Telegram: {str(e)}'
+            }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='webhook-info')
+    def webhook_info(self, request, pk=None):
+        """
+        Get webhook information from Telegram.
+
+        GET /api/v1/bots/{id}/webhook-info/
+
+        Returns:
+        {
+            "delivery_mode": "webhook" | "polling",
+            "webhook_url": "...",
+            "has_custom_url": true/false,
+            "webhook_secret_set": true/false,
+            "telegram_webhook_info": {...}  // From getWebhookInfo API
+        }
+        """
+        bot = self.get_object()
+
+        # Get webhook info from Telegram
+        telegram_info = None
+        telegram_api_url = f"https://api.telegram.org/bot{bot.decrypted_telegram_token}/getWebhookInfo"
+
+        try:
+            response = requests.get(telegram_api_url, timeout=10)
+            result = response.json()
+            if result.get('ok'):
+                telegram_info = result.get('result', {})
+        except Exception as e:
+            logger.warning(f"Failed to get webhook info from Telegram: {str(e)}")
+
+        return Response({
+            'delivery_mode': bot.delivery_mode,
+            'webhook_url': bot.webhook_url or None,
+            'has_custom_url': bool(bot.webhook_url),
+            'webhook_secret_set': bool(bot.webhook_secret),
+            'telegram_webhook_info': telegram_info
+        }, status=status.HTTP_200_OK)
         """
         Delete an API key.
         
