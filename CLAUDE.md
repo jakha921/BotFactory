@@ -10,7 +10,12 @@ Bot Factory is a SaaS platform for creating and managing AI-powered Telegram bot
 - **bot/** - Telegram bot service using aiogram 3.x for multi-bot polling
 - **frontend/** - React admin panel (React 19, TypeScript, Vite)
 
-The architecture follows a multi-bot system where each bot runs independently in its own asyncio.Task, with dynamic reloading when configurations change.
+### Key Architecture Pattern: Multi-Bot System
+- All active bots (`status='active'`) are loaded at startup from the database
+- BotMonitor checks the database every 30 seconds for configuration changes
+- Each bot runs in an isolated asyncio.Task - crashes don't affect other bots
+- BotManager in [bot/services/bot_manager.py](bot/services/bot_manager.py) handles lifecycle
+- Admin access determined by `User.telegram_id` matching staff/superuser users
 
 ## Common Development Commands
 
@@ -181,6 +186,9 @@ VITE_API_URL=http://localhost:8000/api
 - Lint with: `ruff` (or `flake8`)
 - Type check with: `mypy`
 - Follow PEP 8
+- Use async views for external API calls (Gemini, Telegram)
+- Implement rate limiting using Django cache (login: 5/min, register: 3/hour)
+- Business logic goes in services/, not views
 
 ### Frontend (TypeScript/React)
 - Strict TypeScript mode enabled
@@ -189,6 +197,35 @@ VITE_API_URL=http://localhost:8000/api
 - Avoid `any` type - use `unknown` if needed
 - Functional components only (no class components)
 - Glassmorphism design pattern (Apple HIG inspired)
+- Implement error boundaries and offline detection for robust UX
+- Use retry logic for API calls with exponential backoff
+
+## Testing
+
+### Backend
+```bash
+cd backend
+make test  # Run pytest-django tests
+```
+
+### Frontend
+```bash
+cd frontend
+npm run test              # Run Vitest
+npm run test:ui           # Run Vitest UI
+npm run test:coverage     # Coverage report
+```
+
+### Running Single Test
+```bash
+# Backend - specific app
+cd backend
+python manage.py test apps.bots
+
+# Frontend - specific file
+cd frontend
+npm run test -- BotSelector.test.tsx
+```
 
 ## Important Files
 
@@ -213,6 +250,20 @@ Another bot instance is running. Stop with:
 ```bash
 ./stop_all.sh
 ```
+
+### Frontend - "Cannot read property of undefined"
+Use optional chaining and null checks:
+```tsx
+const bot = bots.find(b => b.id === selectedBotId);
+if (!bot) return <EmptyState />;
+console.log(bot.name);  // Safe now
+```
+
+### Frontend - Dark mode not working
+Ensure:
+1. `initializeTheme()` is called in Layout
+2. HTML element has `class="dark"`
+3. Tailwind config has `darkMode: 'class'`
 
 ### Rate Limiting
 Backend implements rate limiting for sensitive endpoints:

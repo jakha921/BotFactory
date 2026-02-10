@@ -102,15 +102,15 @@ def process_telegram_update(self, bot_id, update_data):
             role='model',
             content=response.get('text', '')
         )
-        
+
         # Send response via Telegram
         send_telegram_message.delay(
             bot.decrypted_telegram_token,
             message['chat']['id'],
             response.get('text', '')
         )
-        
-        # Track sent event
+
+        # Track sent event - extract RAG usage from response
         MessageEvent.objects.create(
             bot=bot,
             telegram_user=telegram_user,
@@ -119,9 +119,9 @@ def process_telegram_update(self, bot_id, update_data):
             message_length=len(response.get('text', '')),
             response_time_ms=response_time,
             tokens_used=response.get('usage', {}).get('total_tokens', 0),
-            used_rag=False  # Future feature: RAG with knowledge base (see apps/knowledge/models.py)
+            used_rag=response.get('rag_used', False)
         )
-        
+
         logger.info(f"Processed message for bot {bot.name}, response time: {response_time}ms")
         
     except Exception as e:
@@ -134,8 +134,13 @@ def process_telegram_update(self, bot_id, update_data):
                 event_type='error',
                 error_message=str(e)
             )
-        except:
-            pass
+        except Exception as db_error:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(
+                f"Failed to create error MessageEvent for bot {bot_id}: {db_error}",
+                exc_info=True
+            )
         
         # Retry with exponential backoff
         self.retry(exc=e, countdown=5 * (2 ** self.request.retries))

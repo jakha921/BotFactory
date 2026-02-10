@@ -18,6 +18,7 @@ from bot.integrations.django_orm import (
 )
 from bot.services.message_processor import process_message
 from bot.services.gemini_client import generate_bot_response
+from bot.services.analytics_tracker import track_event, ResponseTimeTracker
 
 logger = logging.getLogger(__name__)
 
@@ -118,11 +119,19 @@ async def handle_message(message: Message, state: FSMContext):
             )
             
             logger.info(f"[CHAT_ROUTER] Processed content: {processed_content[:50] if processed_content else 'None'}...")
-            
+
             if not processed_content or not processed_content.strip():
                 logger.warning("[CHAT_ROUTER] Failed to process message content")
                 await message.answer("Не удалось обработать сообщение. Попробуйте еще раз.")
                 return
+
+            # Track message received event
+            await track_event(
+                bot_id=str(bot.id),
+                event_type='received',
+                telegram_user=telegram_user,
+                message_length=len(processed_content)
+            )
             
             # Save user message
             await save_chat_message(
@@ -138,14 +147,16 @@ async def handle_message(message: Message, state: FSMContext):
             
             # Get chat history
             history = await get_chat_history(chat_session, limit=10)
-            
-            # Generate bot response using Gemini
-            response = await generate_bot_response(
-                bot=bot,
-                prompt=processed_content,
-                history=history
-            )
-            
+
+            # Track response time
+            with ResponseTimeTracker() as timer:
+                # Generate bot response using Gemini
+                response = await generate_bot_response(
+                    bot=bot,
+                    prompt=processed_content,
+                    history=history
+                )
+
             # Prepare attachments - ensure grounding_chunks is JSON serializable
             grounding_chunks = response.get('groundingChunks', [])
             # Convert to list of dicts if needed (safety check)
@@ -158,17 +169,36 @@ async def handle_message(message: Message, state: FSMContext):
                     # If not serializable, convert to empty list
                     logger.warning("[CHAT_ROUTER] groundingChunks is not JSON serializable, skipping")
                     grounding_chunks = []
-            
+
+            # Prepare message attachments with RAG info
+            message_attachments = {
+                'grounding_chunks': grounding_chunks,
+                'rag_used': response.get('rag_used', False),
+                'rag_chunks_count': response.get('rag_chunks_count', 0)
+            }
+
             # Save bot response
             await save_chat_message(
                 session=chat_session,
                 role='model',
                 content=response.get('text', ''),
-                attachments={
-                    'grounding_chunks': grounding_chunks
-                }
+                attachments=message_attachments
             )
-            
+
+            # Track message sent event with timing and analytics
+            input_tokens = response.get('input_tokens', 0)
+            output_tokens = response.get('output_tokens', 0)
+            await track_event(
+                bot_id=str(bot.id),
+                event_type='sent',
+                telegram_user=telegram_user,
+                session=chat_session,
+                message_length=len(response.get('text', '')),
+                response_time_ms=timer.elapsed_ms,
+                tokens_used=input_tokens + output_tokens,
+                used_rag=response.get('rag_used', False)
+            )
+
             # Send response
             response_text = response.get('text', 'Извините, не удалось сгенерировать ответ.')
             logger.info(f"[CHAT_ROUTER] Sending response: {response_text[:50]}...")
@@ -177,6 +207,16 @@ async def handle_message(message: Message, state: FSMContext):
             
         except Exception as e:
             logger.error(f"[CHAT_ROUTER] Error processing message: {str(e)}", exc_info=True)
+
+            # Track error event
+            await track_event(
+                bot_id=str(bot.id),
+                event_type='error',
+                telegram_user=telegram_user,
+                session=chat_session,
+                error_message=str(e)[:500]  # Limit error message length
+            )
+
             try:
                 await message.answer("❌ Произошла ошибка при обработке сообщения. Попробуйте позже.")
             except Exception as send_error:

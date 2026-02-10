@@ -30,16 +30,27 @@ class BotManager:
     
     async def add_bot(self, telegram_token: str, bot_name: str) -> bool:
         """
-        Add and start a bot.
-        
+        Add and start a bot (only for polling mode).
+
         Args:
             telegram_token: Telegram bot token
             bot_name: Bot name for logging
-            
+
         Returns:
             True if bot was added successfully, False otherwise
+            Returns False for webhook mode bots (they don't need polling)
         """
         async with self._lock:
+            # Check if bot is in webhook mode - if so, don't start polling
+            try:
+                bot = await get_bot_by_token(telegram_token)
+                if bot and bot.delivery_mode == 'webhook':
+                    logger.info(f"Bot '{bot_name}' (token: {telegram_token[:20]}...) is in webhook mode - skipping polling")
+                    # Don't add to running_bots for webhook mode
+                    return False
+            except Exception as e:
+                logger.warning(f"Error checking bot delivery mode: {str(e)}")
+
             if telegram_token in self.running_bots:
                 task = self.running_bots[telegram_token]
                 if not task.done():
@@ -50,8 +61,8 @@ class BotManager:
                     del self.running_bots[telegram_token]
                     if telegram_token in self.bot_instances:
                         del self.bot_instances[telegram_token]
-            
-            # Create task for new bot
+
+            # Create task for new bot (only polling mode)
             task = asyncio.create_task(self._run_bot(telegram_token, bot_name))
             self.running_bots[telegram_token] = task
             logger.info(f"Added bot '{bot_name}' (token: {telegram_token[:20]}...) to manager")

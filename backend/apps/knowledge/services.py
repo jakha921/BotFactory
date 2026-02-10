@@ -8,6 +8,27 @@ import docx
 
 logger = logging.getLogger(__name__)
 
+
+def generate_embedding_for_chunk(chunk: DocumentChunk):
+    """
+    Generate or regenerate embedding for a single chunk.
+
+    Args:
+        chunk: DocumentChunk instance
+
+    Raises:
+        Exception: If embedding generation fails
+    """
+    try:
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        embedding = embeddings.embed_query(chunk.text)
+        chunk.embedding = embedding
+        chunk.save()
+        logger.info(f"Generated embedding for chunk {chunk.id}")
+    except Exception as e:
+        logger.error(f"Error generating embedding for chunk {chunk.id}: {str(e)}")
+        raise
+
 def process_document(document: Document):
     """
     Process a document: extract text, split into chunks, generate embeddings.

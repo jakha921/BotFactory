@@ -40,18 +40,23 @@ async def generate_bot_response(
 ) -> Dict[str, Any]:
     """
     Generate bot response using Gemini API.
-    
+
     Args:
         bot: Bot model instance
         prompt: User prompt
         history: Chat history as list of {role, content} dicts
-        
+
     Returns:
-        Dict with 'text' and optional 'groundingChunks'
+        Dict with 'text', optional 'groundingChunks', and 'rag_used' flag
     """
     try:
+        # Check if RAG is enabled for this bot
+        rag_enabled = getattr(bot, 'rag_enabled', True)
+        rag_chunks_count = 0
+
         @sync_to_async
         def _get_rag_context(prompt):
+            nonlocal rag_chunks_count
             try:
                 # 1. Embed the user's prompt
                 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
@@ -81,12 +86,14 @@ async def generate_bot_response(
                     context_parts.append("## Relevant Document Content:")
                     for chunk in doc_chunks:
                         context_parts.append(f"- {chunk.text[:500]}...")  # Limit chunk size
-                
+                    rag_chunks_count += len(doc_chunks)
+
                 if snippet_chunks:
                     context_parts.append("\n## Relevant Knowledge Base Snippets:")
                     for snippet in snippet_chunks:
                         context_parts.append(f"- {snippet.title}: {snippet.content[:500]}...")
-                
+                    rag_chunks_count += len(snippet_chunks)
+
                 if context_parts:
                     return "\n".join(context_parts)
                 return None
@@ -94,13 +101,15 @@ async def generate_bot_response(
                 logger.warning(f"Failed to retrieve RAG context: {str(e)}")
                 return None
 
-        rag_context = await _get_rag_context(prompt)
-        
+        rag_context = None
+        if rag_enabled:
+            rag_context = await _get_rag_context(prompt)
+
         system_instruction = bot.system_instruction or "You are a helpful AI assistant."
-        
+
         if rag_context:
             system_instruction = f"{system_instruction}\n\n{rag_context}"
-        
+
         # Use sync_to_async for Django service
         @sync_to_async
         def _generate_response():
@@ -113,13 +122,18 @@ async def generate_bot_response(
                 thinking_budget=bot.thinking_budget if bot.thinking_budget else None,
                 temperature=bot.temperature or 0.7
             )
-        
+
         result = await _generate_response()
+        # Add RAG usage info to result
+        result['rag_used'] = rag_enabled and rag_context is not None
+        result['rag_chunks_count'] = rag_chunks_count if rag_enabled and rag_context else 0
         return result
     except Exception as e:
         logger.error(f"Error generating bot response: {str(e)}", exc_info=True)
         return {
             'text': 'Извините, произошла ошибка при генерации ответа. Попробуйте позже.',
-            'groundingChunks': []
+            'groundingChunks': [],
+            'rag_used': False,
+            'rag_chunks_count': 0
         }
 

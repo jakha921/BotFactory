@@ -8,6 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404
 
 from apps.chat.models import ChatSession, ChatMessage
@@ -22,15 +23,30 @@ from pgvector.django import L2Distance
 from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
 
 
+class ChatSessionPagination(PageNumberPagination):
+    """Pagination for chat sessions."""
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+class ChatMessagePagination(PageNumberPagination):
+    """Pagination for chat messages."""
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 200
+
+
 class ChatSessionViewSet(viewsets.ReadOnlyModelViewSet):
     """
     ViewSet for managing chat sessions.
-    
+
     list: GET /api/v1/bots/{bot_id}/sessions/ - List chat sessions for a bot
     retrieve: GET /api/v1/sessions/{id}/ - Get session details
     """
     permission_classes = [IsAuthenticated]
     serializer_class = ChatSessionSerializer
+    pagination_class = ChatSessionPagination
     
     def get_queryset(self):
         """Filter sessions by bot and ensure user owns the bot."""
@@ -50,12 +66,13 @@ class ChatSessionViewSet(viewsets.ReadOnlyModelViewSet):
 class ChatMessageViewSet(viewsets.ReadOnlyModelViewSet):
     """
     ViewSet for managing chat messages.
-    
+
     list: GET /api/v1/sessions/{session_id}/messages/ - List messages for a session
     retrieve: GET /api/v1/messages/{id}/ - Get message details
     """
     permission_classes = [IsAuthenticated]
     serializer_class = ChatMessageSerializer
+    pagination_class = ChatMessagePagination
     
     def get_queryset(self):
         """Filter messages by session and ensure user owns the bot."""

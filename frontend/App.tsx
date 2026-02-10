@@ -10,6 +10,7 @@ import { BotSettings } from './pages/BotSettings';
 import { ManageKnowledge } from './pages/ManageKnowledge';
 import { Users } from './pages/Users';
 import { Monitoring } from './pages/Monitoring';
+import { Analytics } from './pages/Analytics';
 import { Subscription } from './pages/Subscription';
 import { Settings } from './pages/Settings';
 import { Onboarding } from './components/Onboarding';
@@ -145,6 +146,10 @@ const App: React.FC = () => {
         case 'monitoring':
           console.log('[App] Rendering Monitoring');
           component = <Monitoring />;
+          break;
+        case 'analytics':
+          console.log('[App] Rendering Analytics');
+          component = <Analytics />;
           break;
         case 'subscription':
           console.log('[App] Rendering Subscription');

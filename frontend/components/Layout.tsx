@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Library,
   Activity,
+  BarChart3,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../utils';
@@ -49,6 +50,7 @@ const Breadcrumbs: React.FC<{ view: View; botContext?: string | null }> = ({
       subscription: ['Subscription'],
       users: ['Team', 'Users'],
       monitoring: ['Monitoring', 'Chat Logs'],
+      analytics: ['Analytics'],
     };
 
     // Override for simpler breadcrumbs on top-level items
@@ -135,6 +137,7 @@ export const Layout: React.FC<LayoutProps> = ({
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'bots', label: 'My Bots', icon: Bot },
     { id: 'monitoring', label: 'Monitoring', icon: Activity },
+    { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'knowledge', label: 'Knowledge Base', icon: Library },
     { id: 'bot-chat', label: 'Bot Chat', icon: MessageSquare },
     { id: 'users', label: 'Users', icon: Users },
@@ -236,7 +239,7 @@ export const Layout: React.FC<LayoutProps> = ({
 
                     // Existing safety cleanup for top-level views
                     if (
-                      ['dashboard', 'bots', 'users', 'subscription', 'settings'].includes(item.id)
+                      ['dashboard', 'bots', 'users', 'subscription', 'settings', 'analytics'].includes(item.id)
                     ) {
                       console.log('[Layout] Resetting selectedBotId for top-level view:', item.id);
                       setSelectedBotId(null);

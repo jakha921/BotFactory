@@ -193,7 +193,8 @@ def logout_view(request):
     except Exception as e:
         # Token might already be blacklisted or invalid
         # Still return success to prevent token leakage
-        pass
+        logger = logging.getLogger(__name__)
+        logger.info(f"Logout token blacklist failed (token may be invalid): {e}")
     
     return Response({
         'message': 'Successfully logged out.'

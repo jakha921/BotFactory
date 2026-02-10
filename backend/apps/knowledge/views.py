@@ -76,13 +76,15 @@ class DocumentViewSet(viewsets.ModelViewSet):
 class DocumentChunkViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing document chunks.
-    
+
     list: GET /api/v1/documents/{document_id}/chunks/ - List chunks for a document
+    update: PATCH /api/v1/chunks/{id}/ - Update chunk text
+    regenerate: POST /api/v1/chunks/{id}/regenerate/ - Regenerate embedding
     """
     permission_classes = [IsAuthenticated]  # DocumentChunk doesn't have owner field
 
     serializer_class = DocumentChunkSerializer
-    
+
     def get_queryset(self):
         """Filter chunks by document and ensure user owns the bot."""
         document_id = self.kwargs.get('document_id')
@@ -90,12 +92,51 @@ class DocumentChunkViewSet(viewsets.ModelViewSet):
             document = get_object_or_404(Document, id=document_id, bot__owner=self.request.user)
             return DocumentChunk.objects.filter(document=document)
         return DocumentChunk.objects.none()
-    
+
     def list(self, request, document_id=None):
         """List chunks for a document."""
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
+
+    def update(self, request, *args, **kwargs):
+        """Update chunk text and regenerate embedding."""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        document = get_object_or_404(Document, id=instance.document.id, bot__owner=self.request.user)
+
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        # If text changed, regenerate embedding
+        if 'text' in serializer.validated_data and serializer.validated_data['text'] != instance.text:
+            chunk = serializer.save()
+            # Regenerate embedding for the updated chunk
+            from .services import generate_embedding_for_chunk
+            generate_embedding_for_chunk(chunk)
+        else:
+            serializer.save()
+
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def regenerate(self, request, *args, **kwargs):
+        """Regenerate embedding for a chunk."""
+        instance = self.get_object()
+        document = get_object_or_404(Document, id=instance.document.id, bot__owner=self.request.user)
+
+        from .services import generate_embedding_for_chunk
+        try:
+            generate_embedding_for_chunk(instance)
+            return Response({
+                'success': True,
+                'message': 'Embedding regenerated successfully'
+            })
+        except Exception as e:
+            return Response({
+                'success': False,
+                'message': f'Failed to regenerate embedding: {str(e)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
 
 class TextSnippetViewSet(viewsets.ModelViewSet):

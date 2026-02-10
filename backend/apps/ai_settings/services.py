@@ -8,24 +8,33 @@ from .models import AIProvider, AIModel, AIFeature, AIUsageLimit, AIUsageLog
 
 class AILimitError(Exception):
     """Exception when usage limit is exceeded."""
-    pass
+
+    def __init__(self, message: str, limit_type: str = None, current_usage: int = None, max_limit: int = None):
+        super().__init__(message)
+        self.limit_type = limit_type
+        self.current_usage = current_usage
+        self.max_limit = max_limit
 
 
 class AIServiceError(Exception):
-    """Exception when AI service fails."""
-    pass
+    """Exception for AI service errors."""
+
+    def __init__(self, message: str, provider: str = None, original_error: Exception = None):
+        super().__init__(message)
+        self.provider = provider
+        self.original_error = original_error
 
 
 class AIService:
     """Service for working with AI providers with usage limits."""
-    
+
     def __init__(self, user):
         self.user = user
-    
+
     def check_limit(self, feature_code: str) -> Tuple[bool, str]:
         """Check if user can use a feature."""
         return AIUsageLog.can_use_feature(self.user, feature_code)
-    
+
     def log_usage(
         self,
         feature_code: str,
@@ -39,13 +48,13 @@ class AIService:
     ):
         """Log AI usage."""
         feature = AIFeature.objects.get(code=feature_code)
-        
+
         # Calculate cost
         cost = (
             (input_tokens / 1000 * float(model.input_cost_per_1k)) +
             (output_tokens / 1000 * float(model.output_cost_per_1k))
         )
-        
+
         AIUsageLog.objects.create(
             user=self.user,
             feature=feature,
@@ -58,27 +67,30 @@ class AIService:
             error_message=error_message,
             metadata=metadata or {}
         )
-    
+
     def get_model(self, model_id: str = None, feature_code: str = None) -> AIModel:
         """Get model to use."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         if model_id:
             try:
                 return AIModel.objects.get(model_id=model_id, is_active=True)
             except AIModel.DoesNotExist:
-                pass
-        
+                logger.warning(f"Model {model_id} not found or inactive, will use default")
+
         if feature_code:
             try:
                 feature = AIFeature.objects.get(code=feature_code)
                 if feature.default_model and feature.default_model.is_active:
                     return feature.default_model
             except AIFeature.DoesNotExist:
-                pass
-        
+                logger.warning(f"Feature {feature_code} not found, will use global default model")
+
         # Default model
         return AIModel.objects.filter(is_active=True, is_default=True).first()
-    
-    def generate(
+
+    async def generate(
         self,
         prompt: str,
         feature_code: str,
@@ -89,31 +101,42 @@ class AIService:
         max_tokens: int = None,
         bot=None
     ) -> Dict[str, Any]:
-        """Generate AI response with limit checking."""
-        
+        """
+        Generate AI response with limit checking using the AI factory.
+
+        This method uses the new AI service abstraction layer to support
+        multiple providers (Gemini, OpenAI, Anthropic) through a unified interface.
+        """
         # 1. Check limit
         can_use, message = self.check_limit(feature_code)
         if not can_use:
             raise AILimitError(message)
-        
+
         # 2. Get model
         model = self.get_model(model_id, feature_code)
         if not model:
             raise AIServiceError("No active AI model available")
-        
-        # 3. Call provider
-        provider = model.provider
-        
+
+        # 3. Get AI service from factory
+        from services.ai_factory import get_ai_service, AIServiceFactory as Factory
+        from services.ai_base import AIServiceError as BaseAIServiceError
+
+        provider_name = model.provider.name
+
         try:
-            if provider.name == 'gemini':
-                result = self._call_gemini(model, prompt, system_instruction, history, temperature)
-            elif provider.name == 'openai':
-                result = self._call_openai(model, prompt, system_instruction, history, temperature)
-            elif provider.name == 'anthropic':
-                result = self._call_anthropic(model, prompt, system_instruction, history, temperature)
-            else:
-                raise AIServiceError(f"Unsupported provider: {provider.name}")
-            
+            # Get service instance (cached by factory)
+            service = get_ai_service(provider_name, api_key=self._get_api_key(model))
+
+            # Generate response using unified interface
+            result = await service.generate_response(
+                model_name=model.model_id,
+                prompt=prompt,
+                system_instruction=system_instruction or "You are a helpful AI assistant.",
+                history=history or [],
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+
             # 4. Log usage
             self.log_usage(
                 feature_code=feature_code,
@@ -123,9 +146,12 @@ class AIService:
                 bot=bot,
                 success=True
             )
-            
+
             return result
-            
+
+        except BaseAIServiceError as e:
+            # Re-raise AI service errors
+            raise AIServiceError(str(e), provider=provider_name, original_error=e)
         except Exception as e:
             # Log error
             self.log_usage(
@@ -136,86 +162,26 @@ class AIService:
                 error_message=str(e)
             )
             raise
-    
-    def _call_gemini(self, model, prompt, system_instruction, history, temperature):
-        """Call Gemini API."""
-        from services.gemini import GeminiService
-        
-        service = GeminiService()
-        response = service.generate_response(
-            model_name=model.model_id,
-            prompt=prompt,
-            system_instruction=system_instruction or "You are a helpful AI assistant.",
-            history=history or [],
-            temperature=temperature
-        )
-        
-        return {
-            'text': response.get('text', ''),
-            'input_tokens': response.get('usage', {}).get('prompt_tokens', 0),
-            'output_tokens': response.get('usage', {}).get('completion_tokens', 0)
-        }
-    
-    def _call_openai(self, model, prompt, system_instruction, history, temperature):
-        """Call OpenAI API."""
-        try:
-            import openai
-        except ImportError:
-            raise AIServiceError("OpenAI package not installed. Run: pip install openai")
-        
+
+    def _get_api_key(self, model: AIModel) -> Optional[str]:
+        """
+        Get API key from provider configuration.
+
+        Args:
+            model: AIModel instance
+
+        Returns:
+            API key or None (uses env var if None)
+        """
         provider = model.provider
-        client = openai.OpenAI(api_key=provider.decrypted_api_key)
-        
-        messages = []
-        if system_instruction:
-            messages.append({"role": "system", "content": system_instruction})
-        
-        if history:
-            for h in history:
-                role = "assistant" if h['role'] == 'model' else h['role']
-                messages.append({"role": role, "content": h['content']})
-        
-        messages.append({"role": "user", "content": prompt})
-        
-        response = client.chat.completions.create(
-            model=model.model_id,
-            messages=messages,
-            temperature=temperature
-        )
-        
-        return {
-            'text': response.choices[0].message.content,
-            'input_tokens': response.usage.prompt_tokens,
-            'output_tokens': response.usage.completion_tokens
+        if hasattr(provider, 'decrypted_api_key') and provider.decrypted_api_key:
+            return provider.decrypted_api_key
+
+        # Fall back to environment variable based on provider name
+        import os
+        env_var_map = {
+            'gemini': 'GEMINI_API_KEY',
+            'openai': 'OPENAI_API_KEY',
+            'anthropic': 'ANTHROPIC_API_KEY',
         }
-    
-    def _call_anthropic(self, model, prompt, system_instruction, history, temperature):
-        """Call Anthropic API."""
-        try:
-            import anthropic
-        except ImportError:
-            raise AIServiceError("Anthropic package not installed. Run: pip install anthropic")
-        
-        provider = model.provider
-        client = anthropic.Anthropic(api_key=provider.decrypted_api_key)
-        
-        messages = []
-        if history:
-            for h in history:
-                role = "assistant" if h['role'] == 'model' else h['role']
-                messages.append({"role": role, "content": h['content']})
-        
-        messages.append({"role": "user", "content": prompt})
-        
-        response = client.messages.create(
-            model=model.model_id,
-            max_tokens=model.max_tokens,
-            system=system_instruction or "You are a helpful AI assistant.",
-            messages=messages
-        )
-        
-        return {
-            'text': response.content[0].text,
-            'input_tokens': response.usage.input_tokens,
-            'output_tokens': response.usage.output_tokens
-        }
+        return os.environ.get(env_var_map.get(provider.name, ''))
